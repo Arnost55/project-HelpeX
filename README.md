@@ -33,17 +33,7 @@ This project is currently **in progress**. Installation and setup instructions w
 
 ```
 project-HelpeX/
-├── helpex.py           # Main entry point
-├── agent/              # AI agent logic
-│   ├── core.py         # Core agent loop
-│   ├── responder.py    # Auto-reply module
-│   └── troubleshoot.py # Troubleshooting engine
-├── monitors/           # System monitoring modules
-│   ├── server.py       # Server health checks
-│   └── windows.py      # Windows PC monitoring
-├── logs/               # Incident and action logs
-├── config.example.yaml # Example configuration
-└── requirements.txt    # Python dependencies
+more soon
 ```
 
 ---

@@ -56,7 +56,7 @@ def process_chat(chat: dict):
         # Add to memory and get reply
         add_message(chat_id, "user", text)
         history = get_history(chat_id)
-        reply = get_reply(history)
+        reply = get_reply(history, last_user_message=text)
         add_message(chat_id, "assistant", reply)
 
         send_message(chat_id, reply)

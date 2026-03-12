@@ -27,6 +27,10 @@ Think of it as having a 24/7 assistant that never sleeps, never misses an alert,
 
 This project is currently **in progress**. Installation and setup instructions will be added once the first stable release is ready.
 
+### 📦 Stable release
+
+A **stable release is planned for this week (around 2026-03-13)**. Features and APIs may still change slightly until that release is tagged.
+
 ---
 
 ## 🗂️ Project Structure

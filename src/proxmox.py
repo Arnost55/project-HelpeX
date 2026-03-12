@@ -3,18 +3,11 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 
-env_path = Path(__file__).resolve().parent / ".env"
-print(f"Loading .env from: {env_path}")
-print(f"File exists: {env_path.exists()}")
-load_dotenv(dotenv_path=env_path, override=True)
+load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env", override=True)
 
 PROXMOX_HOST = os.getenv("PROXMOX_HOST")
 TOKEN_ID = os.getenv("PROXMOX_TOKEN_ID")
 TOKEN_SECRET = os.getenv("PROXMOX_TOKEN_SECRET")
-
-print(f"HOST: {PROXMOX_HOST}")
-print(f"TOKEN_ID: {TOKEN_ID}")
-print(f"TOKEN_SECRET: {TOKEN_SECRET}")
 
 HEADERS = {
     "Authorization": f"PVEAPIToken={TOKEN_ID}={TOKEN_SECRET}"
@@ -67,7 +60,6 @@ def get_summary(node: str = "pve") -> str:
         mem = status.get("memory", {})
         mem_used = round(mem.get("used", 0) / 1024**3, 2)
         mem_total = round(mem.get("total", 0) / 1024**3, 2)
-
         items = list_all(node)
         lines = [f"Node: {node} | CPU: {cpu}% | RAM: {mem_used}/{mem_total} GB\n"]
         for i in items:
@@ -76,7 +68,6 @@ def get_summary(node: str = "pve") -> str:
             name = i.get("name", f"id-{i.get('vmid')}")
             vmid = i.get("vmid")
             lines.append(f"{emoji} [{i['type'].upper()}] {name} (id:{vmid}) — {state}")
-
         return "\n".join(lines)
     except Exception as e:
         return f"Proxmox error: {e}"

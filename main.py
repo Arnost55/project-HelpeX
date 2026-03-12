@@ -1,8 +1,8 @@
 import time
 import logging
-from beeper import get_chats, get_messages, send_message
-from ai import get_reply
-from memory import get_history, add_message
+from src.beeper import get_chats, get_messages, send_message
+from src.ai import get_reply
+from src.memory import get_history, add_message
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -56,9 +56,14 @@ def process_chat(chat: dict):
         # Add to memory and get reply
         add_message(chat_id, "user", text)
         history = get_history(chat_id)
-        reply = get_reply(history, last_user_message=text)
+        try:
+            reply = get_reply(history, last_user_message=text)
+        except Exception as e:
+            logging.error(f"[{chat_id}] get_reply failed: {e}")
+            reply = "something went wrong on my end, try again"
+        if not reply or not reply.strip():
+            reply = "something went wrong, didn't get a response"
         add_message(chat_id, "assistant", reply)
-
         send_message(chat_id, reply)
         last_reply_time[chat_id] = time.time()
         logging.info(f"[{chat_id}] Replied: {reply}")

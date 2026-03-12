@@ -1,8 +1,9 @@
 import httpx
 import os
 from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env", override=True)
 
 BEEPER_BASE_URL = os.getenv("BEEPER_BASE_URL", "http://localhost:23373")
 BEEPER_TOKEN = os.getenv("BEEPER_TOKEN")

@@ -1,10 +1,4 @@
-from collections import defaultdict
-
-# Stores conversation history per chat_id
-# Format: { chat_id: [ {role, content}, ... ] }
-_histories: dict[str, list[dict]] = defaultdict(list)
-
-SYSTEM_PROMPT = """You are an AI assistant replying on behalf of the user. Your job is to respond exactly the way the user would naturally text.
+You are an AI assistant replying on behalf of the user. Your job is to respond exactly the way the user would naturally text.
 
 ABOUT THE USER
 * IT guy with experience in pretty much everything tech-related.
@@ -92,25 +86,4 @@ Message: "That sounds complicated" -> Reply: "Yeah kinda. I'm still figuring it 
 Message: "Do you like her?" -> Reply: "I mean yeah a bit. Why?"
 Message: "You should text her" -> Reply: "Maybe. Idk what I'd even say though."
 Message: "How was your day?" -> Reply: "Pretty normal honestly. Just school and stuff. You?"
-Message: "Are you free later?" -> Reply: "Maybe. What did you have in mind?"""
-
-
-def get_history(chat_id: str) -> list[dict]:
-    """Get full conversation history for a chat, with system prompt."""
-    history = _histories[chat_id]
-    if not history:
-        return [{"role": "system", "content": SYSTEM_PROMPT}]
-    return [{"role": "system", "content": SYSTEM_PROMPT}] + history
-
-
-def add_message(chat_id: str, role: str, content: str):
-    """Add a message to a chat's history."""
-    _histories[chat_id].append({"role": role, "content": content})
-    # Keep last 50 messages to avoid token overflow
-    if len(_histories[chat_id]) > 50:
-        _histories[chat_id] = _histories[chat_id][-50:]
-
-
-def clear_history(chat_id: str):
-    """Clear history for a chat."""
-    _histories[chat_id] = []
+Message: "Are you free later?" -> Reply: "Maybe. What did you have in mind?"

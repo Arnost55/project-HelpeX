@@ -1,5 +1,6 @@
 .env
 password_whitelist.txt
+topic_whitelist.txt
 __pycache__/
 *.pyc
 chats.json

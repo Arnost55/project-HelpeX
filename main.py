@@ -2,7 +2,7 @@ import time
 import logging
 from src.beeper import get_chats, get_messages, send_message
 from src.ai import get_reply
-from src.memory import get_history, add_message
+from src.memory import get_history, add_message, clear_history
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -16,6 +16,17 @@ last_reply_time: dict[str, float] = {}  # chat_id -> last reply timestamp
 WHITELISTED_CHAT_IDS: set[str] = {
     "!VTNn6ycF9Ra-t5budt4ouG-3XuE:ba_BOFedZbMtGo9iKjIobXdnlYx08w.local-telegram.localhost",
 }
+
+# PASSWORD_WHITELIST: loaded from password_whitelist.txt (one chat ID per line, # = comment)
+def _load_password_whitelist(path: str = "password_whitelist.txt") -> set[str]:
+    try:
+        with open(path, encoding="utf-8") as f:
+            return {line.split("#")[0].strip() for line in f if line.split("#")[0].strip()}
+    except FileNotFoundError:
+        logging.warning(f"password_whitelist.txt not found — password tool disabled for all chats")
+        return set()
+
+PASSWORD_WHITELIST = _load_password_whitelist()
 
 
 def process_chat(chat: dict):
@@ -57,10 +68,13 @@ def process_chat(chat: dict):
         add_message(chat_id, "user", text)
         history = get_history(chat_id)
         try:
-            reply = get_reply(history, last_user_message=text)
+            reply = get_reply(history, last_user_message=text, chat_id=chat_id, password_whitelist=PASSWORD_WHITELIST)
         except Exception as e:
             logging.error(f"[{chat_id}] get_reply failed: {e}")
-            reply = "something went wrong on my end, try again"
+            if "400" in str(e) or "tool_use_failed" in str(e):
+                logging.warning(f"[{chat_id}] Clearing history due to corrupted tool context")
+                clear_history(chat_id)
+            reply = "you're not authorized for this, sorry"
         if not reply or not reply.strip():
             reply = "something went wrong, didn't get a response"
         add_message(chat_id, "assistant", reply)

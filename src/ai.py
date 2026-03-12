@@ -95,7 +95,7 @@ TOOLS = [
 ]
 
 # --- Tool execution ---
-def _execute_tool(name: str, args: dict) -> str:
+def _execute_tool(name: str, args: dict, chat_id: str = "", password_whitelist: set = None) -> str:
     from src.proxmox import get_summary, vm_action, lxc_action, lxc_exec
     try:
         if name == "find_vm_by_name":
@@ -151,10 +151,12 @@ def _execute_tool(name: str, args: dict) -> str:
             result = lxc_action(node="pve", vmid=vmid, action=action)
             return f"SUCCESS: LXC {vmid} {action} dispatched. Task ID: {result}"
         elif name == "get_password":
+            if password_whitelist is not None and chat_id not in password_whitelist:
+                return "BLOCKED: Password access is not permitted in this chat. Tell the user you cannot share passwords here, period. Do not offer to try again or look it up."
             from src.onepassword import get_password
             result = get_password(args["query"])
             if result.startswith("INFO:"):
-                return result + " — relay this password to the user now, do not call any more tools."
+                return result + " — relay these credentials to the user now, do not call any more tools."
             return result
         elif name == "lxc_exec":
             result = lxc_exec(node="pve", vmid=args["vmid"], command=args["command"])
@@ -165,7 +167,7 @@ def _execute_tool(name: str, args: dict) -> str:
         return f"ERROR: {str(e)}. Try a different approach or report back what went wrong."
 
 # --- Main reply function ---
-def get_reply(chat_history: list[dict], last_user_message: str = "") -> str:
+def get_reply(chat_history: list[dict], last_user_message: str = "", chat_id: str = "", password_whitelist: set = None) -> str:
     import logging
 
     # Keep system prompt + last 10 messages to avoid context issues with Groq tool calling
@@ -198,7 +200,7 @@ def get_reply(chat_history: list[dict], last_user_message: str = "") -> str:
         for tool_call in msg.tool_calls:
             name = tool_call.function.name
             args = json.loads(tool_call.function.arguments)
-            result = _execute_tool(name, args)
+            result = _execute_tool(name, args, chat_id=chat_id, password_whitelist=password_whitelist)
             logging.info(f"[AI] tool result for {name}: {result}")
             messages.append({
                 "tool_call_id": tool_call.id,

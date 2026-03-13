@@ -100,20 +100,26 @@ def _execute_tool(name: str, args: dict, chat_id: str = "", password_whitelist: 
     try:
         if name == "find_vm_by_name":
             from src.proxmox import list_all
+            from difflib import SequenceMatcher
             items = list_all()
             query = args["name"].lower().strip()
-            matches = [i for i in items if query in i.get("name", "").lower()]
-            if not matches:
-                query_words = query.split()
-                matches = [i for i in items if any(qw in i.get("name", "").lower() for qw in query_words)]
-            if not matches:
-                def similarity(a, b):
-                    a, b = a.lower(), b.lower()
-                    return sum(1 for c in a if c in b) / max(len(a), 1)
-                matches = [i for i in items if similarity(query, i.get("name", "")) >= 0.6]
-            if not matches:
+
+            def score(item_name):
+                n = item_name.lower()
+                if query == n: return 1.0
+                if query in n or n in query: return 0.9
+                return SequenceMatcher(None, query, n).ratio()
+
+            scored = [(i, score(i.get("name", ""))) for i in items]
+            scored.sort(key=lambda x: x[1], reverse=True)
+            best_score = scored[0][1] if scored else 0
+
+            if best_score < 0.4:
                 all_names = [i.get('name') for i in items]
-                return f"ERROR: No VM or LXC found matching '{args['name']}'. Available machines: {all_names}. Try a different name."
+                return f"ERROR: No VM or LXC found matching '{args['name']}'. Available machines: {all_names}."
+
+            # Return all matches above threshold
+            matches = [i for i, s in scored if s >= 0.4]
             return json.dumps([{"name": i.get("name"), "vmid": i.get("vmid"), "type": i["type"], "status": i.get("status")} for i in matches])
         elif name == "get_server_summary":
             return get_summary()

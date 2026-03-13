@@ -1,40 +1,41 @@
 import os
 import asyncio
-from dotenv import load_dotenv
+from dotenv import load_dotenv, dotenv_values
 from pathlib import Path
 
-load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env", override=True)
+ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(dotenv_path=ROOT / ".env", override=True)
 
 TOKEN = os.getenv("OP_SERVICE_ACCOUNT_TOKEN")
-VAULT_NAME = os.getenv("OP_VAULT", "Family")
 
-_vault_id_cache = None
+# Load all vault names from any OP_VAULT_* or OP_VAULT key in .env
+def _load_vault_names() -> list[str]:
+    values = dotenv_values(ROOT / ".env")
+    vaults = []
+    for key, val in values.items():
+        if key == "OP_VAULT" or key.startswith("OP_VAULT_"):
+            if val and val.strip():
+                vaults.append(val.strip())
+    return vaults if vaults else ["Family"]
+
+VAULT_NAMES = _load_vault_names()
+
+# Cache: vault name -> vault id
+_vault_id_cache: dict[str, str] = {}
 
 
 def _fuzzy_score(query: str, title: str) -> float:
+    from difflib import SequenceMatcher
     query = query.lower().strip()
     title = title.lower().strip()
     if query == title:
         return 1.0
     if query in title or title in query:
         return 0.9
-    query_words = set(query.split())
-    title_words = set(title.split())
-    if query_words == title_words:
-        return 0.85
-    overlap = query_words & title_words
-    if overlap:
-        return 0.5 + 0.3 * (len(overlap) / max(len(query_words), len(title_words)))
-    # Character overlap fallback
-    q_chars = set(query.replace(" ", ""))
-    t_chars = set(title.replace(" ", ""))
-    char_overlap = len(q_chars & t_chars) / max(len(q_chars), len(t_chars))
-    return char_overlap * 0.3
+    return SequenceMatcher(None, query, title).ratio()
 
 
-async def _get_password_async(query: str) -> str:
-    global _vault_id_cache
-
+async def _get_credentials_async(query: str) -> str:
     from onepassword.client import Client
 
     client = await Client.authenticate(
@@ -43,60 +44,68 @@ async def _get_password_async(query: str) -> str:
         integration_version="v1.0.0",
     )
 
-    # Get vault ID (cached)
-    if not _vault_id_cache:
+    # Resolve vault IDs for all configured vaults
+    if len(_vault_id_cache) < len(VAULT_NAMES):
         vaults = await client.vaults.list()
         for v in vaults:
-            if v.title.lower() == VAULT_NAME.lower():
-                _vault_id_cache = v.id
-                break
-        if not _vault_id_cache:
-            return f"ERROR: Vault '{VAULT_NAME}' not found."
+            if v.title in VAULT_NAMES and v.title not in _vault_id_cache:
+                _vault_id_cache[v.title] = v.id
 
-    # List all items and fuzzy match
-    items = await client.items.list(vault_id=_vault_id_cache)
-    scored = [(item, _fuzzy_score(query, item.title)) for item in items]
-    scored.sort(key=lambda x: x[1], reverse=True)
+    if not _vault_id_cache:
+        return f"ERROR: None of the configured vaults found: {VAULT_NAMES}"
 
-    if not scored or scored[0][1] < 0.3:
-        return f"ERROR: No item found in 1Password matching '{query}'."
+    # Search all vaults, collect scored matches
+    all_scored = []
+    for vault_name, vault_id in _vault_id_cache.items():
+        items = await client.items.list(vault_id=vault_id)
+        for item in items:
+            score = _fuzzy_score(query, item.title)
+            all_scored.append((item, vault_name, vault_id, score))
 
-    best_item = scored[0][0]
+    all_scored.sort(key=lambda x: x[3], reverse=True)
 
-    # Resolve both username and password via secret references
-    username, password = None, None
-    try:
-        username = await client.secrets.resolve(f"op://{VAULT_NAME}/{best_item.title}/username")
-    except Exception:
-        pass
-    try:
-        password = await client.secrets.resolve(f"op://{VAULT_NAME}/{best_item.title}/password")
-    except Exception:
-        pass
+    if not all_scored or all_scored[0][3] < 0.4:
+        return f"ERROR: No item found matching '{query}' in vaults: {list(_vault_id_cache.keys())}."
 
-    # Fallback: fetch full item and scan fields
-    if not username or not password:
-        full_item = await client.items.get(vault_id=_vault_id_cache, item_id=best_item.id)
-        for field in full_item.fields:
-            t = field.title.lower()
-            if not username and t in ("username", "meno", "email", "e-mail", "login"):
-                username = field.value
-            if not password and t in ("password", "heslo"):
-                password = field.value
+    best_item, best_vault, best_vault_id, _ = all_scored[0]
 
-    if not username and not password:
-        return f"ERROR: Found item '{best_item.title}' but couldn't extract any credentials."
+    # Fetch full item to get fields
+    full_item = await client.items.get(vault_id=best_vault_id, item_id=best_item.id)
 
-    parts = [f"INFO: Credentials for '{best_item.title}':"]
+    username = None
+    password = None
+    ssh_key = None
+
+    for field in full_item.fields:
+        t = field.title.lower()
+        if not username and t in ("username", "email", "user", "login", "e-mail"):
+            username = field.value
+        elif not password and t in ("password", "heslo"):
+            password = field.value
+        elif not ssh_key and t in ("private key", "ssh key", "key", "private_key"):
+            ssh_key = field.value
+
+    # Fallback for password via secret reference
+    if not password:
+        try:
+            password = await client.secrets.resolve(f"op://{best_vault}/{best_item.title}/password")
+        except Exception:
+            pass
+
+    parts = [f"INFO: Credentials for '{best_item.title}' (vault: {best_vault}):"]
     if username:
-        parts.append(f"Username: {username}")
+        parts.append(f"username: {username}")
     if password:
-        parts.append(f"Password: {password}")
+        parts.append(f"password: {password}")
+    if ssh_key:
+        parts.append(f"SSH key: {ssh_key}")
+    if len(parts) == 1:
+        return f"ERROR: Found '{best_item.title}' but couldn't extract any credentials."
     return " | ".join(parts)
 
 
 def get_password(query: str) -> str:
     try:
-        return asyncio.run(_get_password_async(query))
+        return asyncio.run(_get_credentials_async(query))
     except Exception as e:
         return f"ERROR: 1Password lookup failed: {e}"

@@ -1,5 +1,6 @@
 import time
 import logging
+import os
 from src.beeper import get_chats, get_messages, send_message
 from src.ai import get_reply
 from src.memory import get_history, add_message, clear_history
@@ -65,6 +66,24 @@ def _is_topic_allowed(chat_id: str, text: str, topic_whitelist: dict[str, list[s
 
 
 PASSWORD_WHITELIST = _load_password_whitelist()
+
+def _error_reply(error: str) -> str:
+    """Ask the model to produce a natural, casual reply explaining the error."""
+    try:
+        from groq import Groq
+        c = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        resp = c.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "You are a casual assistant texting someone. In one short sentence, explain that something went wrong based on the error below. Be natural, don't be technical, don't mention API or code."},
+                {"role": "user", "content": f"Error: {error}"}
+            ],
+            max_tokens=60
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception:
+        return "something went wrong, try again later"
+
 TOPIC_WHITELIST = _load_topic_whitelist()
 
 
@@ -118,7 +137,7 @@ def process_chat(chat: dict):
             if "400" in str(e) or "tool_use_failed" in str(e):
                 logging.warning(f"[{chat_id}] Clearing history due to corrupted tool context")
                 clear_history(chat_id)
-            reply = "you're not authorized for this, sorry"
+            reply = _error_reply(str(e))
         if not reply or not reply.strip():
             reply = "something went wrong, didn't get a response"
         add_message(chat_id, "assistant", reply)

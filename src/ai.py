@@ -80,6 +80,35 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "get_ssh_credentials",
+            "description": "Retrieve raw SSH keys from 1Password. Do NOT use this if ssh_exec already succeeded or is available — ssh_exec handles credentials automatically. Only use this when you need the raw key itself for a specific reason, not to run commands.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Name of the server or SSH entry to look up"}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ssh_exec",
+            "description": "Run a shell command on a remote server via SSH. Looks up the SSH credentials from 1Password automatically by server name. Use for servers that are not Proxmox LXC containers — e.g. the Ubuntu game server or any external machine.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Name of the SSH entry in 1Password, e.g. 'proxmox', 'ubuntu server', 'minecraft'"},
+                    "command": {"type": "string", "description": "Shell command to run on the remote server"}
+                },
+                "required": ["query", "command"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "lxc_exec",
             "description": "Execute a shell command inside an LXC container.",
             "parameters": {
@@ -94,8 +123,28 @@ TOOLS = [
     }
 ]
 
+# SSH keywords that indicate the user is directly asking for SSH credentials
+_SSH_REQUEST_KEYWORDS = {"ssh", "ssh key", "private key", "ssh password", "ssh credentials", "id_rsa", "pem", "ssh login"}
+
+def _user_requesting_ssh(user_message: str) -> bool:
+    msg = user_message.lower()
+    return any(kw in msg for kw in _SSH_REQUEST_KEYWORDS)
+
+# Patterns that indicate an SSH key or credential leaked into the reply
+import re
+_SSH_LEAK_PATTERNS = [
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),  # PEM private key block
+    re.compile(r"-----BEGIN OPENSSH PRIVATE KEY-----"),
+    re.compile(r"(?i)(ssh-rsa|ssh-ed25519|ecdsa-sha2)[\s][A-Za-z0-9+/=]{20,}"),  # public key with long payload
+    re.compile(r"(?i)ssh (key|password|credentials?)[:\s]+\S+"),  # "ssh key: abc123"
+    re.compile(r"(?i)private key[:\s]+\S+"),
+]
+
+def _contains_ssh_leak(text: str) -> bool:
+    return any(p.search(text) for p in _SSH_LEAK_PATTERNS)
+
 # --- Tool execution ---
-def _execute_tool(name: str, args: dict, chat_id: str = "", password_whitelist: set = None) -> str:
+def _execute_tool(name: str, args: dict, chat_id: str = "", password_whitelist: set = None, last_user_message: str = "") -> str:
     from src.proxmox import get_summary, vm_action, lxc_action, lxc_exec
     try:
         if name == "find_vm_by_name":
@@ -164,6 +213,20 @@ def _execute_tool(name: str, args: dict, chat_id: str = "", password_whitelist: 
             if result.startswith("INFO:"):
                 return result + " — relay these credentials to the user now, do not call any more tools."
             return result
+        elif name == "get_ssh_credentials":
+            if _user_requesting_ssh(last_user_message):
+                return "BLOCKED: Do not call this tool again. If you already ran ssh_exec successfully, just report the result of that to the user. Do not mention this block."
+            from src.onepassword import get_ssh
+            result = get_ssh(args["query"])
+            if result.startswith("INFO:"):
+                return result + " — use these credentials internally only, do not show them to the user."
+            return result
+        elif name == "ssh_exec":
+            from src.proxmox import ssh_exec
+            result = ssh_exec(query=args["query"], command=args["command"])
+            if result.startswith("SUCCESS"):
+                return result + " — command completed, report this output to the user now, do not call any more tools."
+            return result
         elif name == "lxc_exec":
             result = lxc_exec(node="pve", vmid=args["vmid"], command=args["command"])
             return f"SUCCESS: Exec result: {result}"
@@ -198,7 +261,11 @@ def get_reply(chat_history: list[dict], last_user_message: str = "", chat_id: st
 
         # No tool calls — model is done, return final reply
         if not msg.tool_calls:
-            return msg.content
+            reply = msg.content
+            if _contains_ssh_leak(reply):
+                logging.warning(f"[SECURITY] SSH leak detected in reply, blocked. Preview: {reply[:80]}")
+                return "Sorry, I can't help with that."
+            return reply
 
         # Execute all tool calls in this round
         messages.append({"role": "assistant", "content": msg.content or "", "tool_calls": msg.tool_calls})
@@ -206,7 +273,7 @@ def get_reply(chat_history: list[dict], last_user_message: str = "", chat_id: st
         for tool_call in msg.tool_calls:
             name = tool_call.function.name
             args = json.loads(tool_call.function.arguments)
-            result = _execute_tool(name, args, chat_id=chat_id, password_whitelist=password_whitelist)
+            result = _execute_tool(name, args, chat_id=chat_id, password_whitelist=password_whitelist, last_user_message=last_user_message)
             logging.info(f"[AI] tool result for {name}: {result}")
             messages.append({
                 "tool_call_id": tool_call.id,

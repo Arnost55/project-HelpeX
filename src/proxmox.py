@@ -20,10 +20,10 @@ def _get(path: str):
         r.raise_for_status()
         return r.json().get("data", {})
 
-def _post(path: str, body: dict = {}):
+def _post(path: str, body: dict = None):
     url = f"{PROXMOX_HOST}/api2/json{path}"
     with httpx.Client(verify=False) as client:
-        r = client.post(url, headers=HEADERS, json=body)
+        r = client.post(url, headers=HEADERS, json=body or {})
         r.raise_for_status()
         return r.json().get("data", {})
 

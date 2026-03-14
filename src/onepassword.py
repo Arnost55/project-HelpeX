@@ -79,7 +79,6 @@ async def _get_credentials_async(query: str, vault_filter: str = None) -> str:
 
     username = None
     password = None
-    ssh_key = None
 
     for field in full_item.fields:
         t = field.title.lower()
@@ -87,8 +86,6 @@ async def _get_credentials_async(query: str, vault_filter: str = None) -> str:
             username = field.value
         elif not password and t in ("password", "heslo"):
             password = field.value
-        elif not ssh_key and t in ("private key", "ssh key", "key", "private_key"):
-            ssh_key = field.value
 
     if not password:
         try:
@@ -101,8 +98,6 @@ async def _get_credentials_async(query: str, vault_filter: str = None) -> str:
         parts.append(f"username: {username}")
     if password:
         parts.append(f"password: {password}")
-    if ssh_key:
-        parts.append(f"SSH key: {ssh_key}")
     if len(parts) == 1:
         return f"ERROR: Found '{best_item.title}' but couldn't extract any credentials."
     return " | ".join(parts)

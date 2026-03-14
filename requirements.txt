@@ -1,3 +1,4 @@
 httpx
 groq
 python-dotenv
+onepassword-sdk

@@ -1,5 +1,7 @@
 import os
+import re
 import json
+import logging
 from groq import Groq
 from dotenv import load_dotenv
 from pathlib import Path
@@ -131,7 +133,6 @@ def _user_requesting_ssh(user_message: str) -> bool:
     return any(kw in msg for kw in _SSH_REQUEST_KEYWORDS)
 
 # Patterns that indicate an SSH key or credential leaked into the reply
-import re
 _SSH_LEAK_PATTERNS = [
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),  # PEM private key block
     re.compile(r"-----BEGIN OPENSSH PRIVATE KEY-----"),
@@ -235,9 +236,11 @@ def _execute_tool(name: str, args: dict, chat_id: str = "", password_whitelist: 
     except Exception as e:
         return f"ERROR: {str(e)}. Try a different approach or report back what went wrong."
 
+DESTRUCTIVE_ACTIONS = {"stop", "shutdown", "reboot"}
+
 # --- Main reply function ---
-def get_reply(chat_history: list[dict], last_user_message: str = "", chat_id: str = "", password_whitelist: set = None) -> str:
-    import logging
+# Returns (reply_text, confirmation_needed_dict | None)
+def get_reply(chat_history: list[dict], last_user_message: str = "", chat_id: str = "", password_whitelist: set = None) -> tuple[str, dict | None]:
 
     # Keep system prompt + last 10 messages to avoid context issues with Groq tool calling
     system = [m for m in chat_history if m["role"] == "system"]
@@ -264,8 +267,8 @@ def get_reply(chat_history: list[dict], last_user_message: str = "", chat_id: st
             reply = msg.content
             if _contains_ssh_leak(reply):
                 logging.warning(f"[SECURITY] SSH leak detected in reply, blocked. Preview: {reply[:80]}")
-                return "Sorry, I can't help with that."
-            return reply
+                return "Sorry, I can't help with that.", None
+            return reply, None
 
         # Execute all tool calls in this round
         messages.append({"role": "assistant", "content": msg.content or "", "tool_calls": msg.tool_calls})
@@ -273,6 +276,33 @@ def get_reply(chat_history: list[dict], last_user_message: str = "", chat_id: st
         for tool_call in msg.tool_calls:
             name = tool_call.function.name
             args = json.loads(tool_call.function.arguments)
+
+            # Intercept destructive VM/LXC actions before executing
+            if name in ("vm_action", "lxc_action") and args.get("action") in DESTRUCTIVE_ACTIONS:
+                from src.proxmox import list_all
+                vmid = args.get("vmid")
+                action = args.get("action")
+                if not vmid:
+                    result = "ERROR: vmid missing for destructive action."
+                    messages.append({"tool_call_id": tool_call.id, "role": "tool", "name": name, "content": result})
+                    continue
+                vm_type = "vm" if name == "vm_action" else "lxc"
+                # Try to get the name for a friendlier confirmation message
+                try:
+                    items = list_all()
+                    match = next((i for i in items if i.get("vmid") == vmid), None)
+                    vm_name = match.get("name", str(vmid)) if match else str(vmid)
+                except Exception:
+                    vm_name = str(vmid)
+                confirmation = {
+                    "vmid": vmid,
+                    "action": action,
+                    "type": vm_type,
+                    "name": vm_name,
+                    "node": "pve"
+                }
+                return f"hold on, going to {action} {vm_name}", confirmation
+
             result = _execute_tool(name, args, chat_id=chat_id, password_whitelist=password_whitelist, last_user_message=last_user_message)
             logging.info(f"[AI] tool result for {name}: {result}")
             messages.append({
@@ -282,4 +312,4 @@ def get_reply(chat_history: list[dict], last_user_message: str = "", chat_id: st
                 "content": result
             })
 
-    return "Something went wrong, couldn't complete the action."
+    return "Something went wrong, couldn't complete the action.", None

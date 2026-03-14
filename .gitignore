@@ -4,3 +4,4 @@ topic_whitelist.txt
 __pycache__/
 *.pyc
 chats.json
+chats_whitelist.txt

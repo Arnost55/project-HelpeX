@@ -5,3 +5,5 @@ __pycache__/
 *.pyc
 chats.json
 chats_whitelist.txt
+*.zip
+*.tar.gz

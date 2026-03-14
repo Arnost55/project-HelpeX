@@ -41,6 +41,8 @@ project-HelpeX/
 ├── chats_whitelist.txt      # which chats the agent listens to
 ├── password_whitelist.txt   # chat IDs allowed to request passwords
 ├── topic_whitelist.txt      # per-chat topic restrictions
+├── tools/
+│   └── list_chats.py        # utility: print all chat IDs and names
 └── src/
     ├── ai.py                # Groq LLM + agentic tool calling loop
     ├── beeper.py            # Beeper API client
@@ -86,6 +88,12 @@ cp .env.example .env
 Fill in your `.env` — see `.env.example` for all required values.
 
 ### 4. Configure chat access
+
+To find your chat IDs, run:
+```bash
+python tools/list_chats.py
+```
+This prints all chats with their names and IDs. Alternatively, start the agent and send a message — the chat ID will appear in the logs.
 
 Edit `chats_whitelist.txt` — controls which chats the agent listens to:
 ```

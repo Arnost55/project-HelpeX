@@ -1,0 +1,30 @@
+# chats_whitelist.txt — controls which chats the agent listens to
+#
+# Copy this file to chats_whitelist.txt and configure it.
+# chats_whitelist.txt is gitignored and will never be committed.
+#
+# To find your chat IDs run:
+#   python tools/list_chats.py
+#
+# Syntax:
+#   *                     listen to ALL chats
+#   *telegram*            only chats whose ID contains "telegram"
+#   *signal*              only Signal chats
+#   *telegram* *signal*   Telegram and Signal
+#   !exactChatId          exclude this specific chat (takes priority over patterns)
+#
+# Examples:
+#
+# Listen to everything:
+# *
+#
+# Only Telegram:
+# *telegram*
+#
+# Everything except one group chat:
+# *
+# !someGroupChatId
+#
+# Specific chat IDs only:
+# !abc123:beeper.local
+# !xyz456:beeper.local

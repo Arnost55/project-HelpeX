@@ -69,7 +69,7 @@ project-HelpeX/
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/yourusername/project-HelpeX.git
+git clone https://github.com/Arnost55/project-HelpeX.git
 cd project-HelpeX
 ```
 

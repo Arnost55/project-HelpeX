@@ -1,26 +1,48 @@
 # 🤖 project-HelpeX
 
-> A self-hosted AI agent that acts as your personal IT secretary — monitors your servers, controls VMs, runs commands, and replies on your behalf over chat.
+> The self-hosted AI agent platform that actually knows your infrastructure — a privacy-first alternative to OpenClaw built for homelabbers.
 
 ---
 
 ## 🧠 What is HelpeX?
 
-**HelpeX** is a Python-based AI agent that runs 24/7 on your home server. It connects to your chat platform (via Beeper), reads incoming messages, and autonomously handles server management tasks — starting/stopping VMs, running shell commands over SSH, checking server health, and looking up credentials from 1Password — all while replying naturally in your tone.
+**HelpeX** is an open-source AI agent platform that runs 24/7 on your home server. Like OpenClaw, it connects to your chat platforms and handles tasks autonomously — but where OpenClaw is general-purpose, HelpeX is built from the ground up for **self-hosted infrastructure management**.
+
+It connects to Beeper (giving you Telegram, WhatsApp, Signal, iMessage and more in one API), reads incoming messages, and autonomously handles server tasks — controlling VMs, running SSH commands, checking service health, looking up credentials — all while replying naturally in your tone.
 
 It doesn't feel like a bot. It feels like you, but always online.
+
+---
+
+## ⚡ HelpeX vs OpenClaw
+
+| | HelpeX | OpenClaw |
+|---|---|---|
+| Self-hosted | ✅ Always | ✅ Yes |
+| Chat platforms | ✅ 20+ via Beeper | ✅ 30+ native |
+| Proxmox control | ✅ First-class | ❌ No |
+| SSH execution | ✅ Via 1Password keys | ❌ No |
+| 1Password integration | ✅ Built-in | ❌ No |
+| Homarr integration | ✅ Built-in | ❌ No |
+| Confirmation gates | ✅ Built-in | ❌ No |
+| SSH secret protection | ✅ 3-layer | ❌ No |
+| Multilingual (SK/CZ/EN) | ✅ Built-in | ❌ No |
+| Impersonation mode | ✅ Replies as you | ❌ No |
+| Skills system | 🔜 Coming in v2 | ✅ Yes |
+| Community skills | 🔜 Coming in v2 | ✅ Yes |
 
 ---
 
 ## ✨ Features
 
 - 💬 **Chat-native** — Connects via Beeper, works across Telegram, WhatsApp, Signal, and more
-- 🖥️ **Proxmox control** — Start, stop, reboot VMs and LXC containers by name or ID
+- 🖥️ **Proxmox control** — Start, stop, reboot VMs and LXC containers by name
 - 🔒 **1Password integration** — Looks up credentials from your vault on request
 - 🔑 **SSH execution** — Runs shell commands on remote servers using keys stored in 1Password
+- 📊 **Homarr integration** — Checks service status across all your machines
 - 🧠 **Agentic tool loop** — Chains multiple tool calls automatically to complete complex tasks
-- 🗂️ **Per-chat memory** — Maintains conversation history per chat for context-aware replies
-- 🌍 **Multilingual** — Replies in Slovak, Czech, or English depending on who's writing
+- 🗂️ **Per-chat memory** — Maintains conversation history per chat, persisted across restarts
+- 🌍 **Multilingual** — Replies in the language the other person is writing in
 - 🔐 **SSH secret protection** — SSH keys are never exposed to users, used internally only
 - ✅ **Confirmation gate** — Asks before executing destructive actions (stop, shutdown, reboot)
 - 📋 **Per-chat permissions** — Password access and topic restrictions configurable per chat
@@ -48,14 +70,15 @@ project-HelpeX/
     ├── beeper.py            # Beeper API client
     ├── memory.py            # per-chat conversation history
     ├── proxmox.py           # Proxmox REST API + SSH exec
-    └── onepassword.py       # 1Password SDK integration
+    ├── onepassword.py       # 1Password SDK integration
+    └── homarr.py            # Homarr service status checks
 ```
 
 ---
 
 ## ⚙️ Requirements
 
-- Python 3.11+
+- Python 3.12
 - [Beeper Desktop](https://www.beeper.com/) running locally with Remote Access enabled
 - Proxmox server with an API token
 - 1Password with a Service Account and a vault for passwords + one for SSH keys
@@ -70,7 +93,7 @@ project-HelpeX/
 
 ```bash
 git clone https://github.com/Arnost55/project-HelpeX.git
-cd project-HelpeX
+cd project-HelpeX/dev
 ```
 
 ### 2. Install dependencies
@@ -100,7 +123,7 @@ Edit `chats_whitelist.txt` — controls which chats the agent listens to:
 *                   # listen to all chats
 *telegram*          # only Telegram chats
 *telegram* *signal* # Telegram and Signal
-!specificChatId     # exclude a specific chat (takes priority)
+-!specificChatId    # exclude a specific chat (takes priority)
 ```
 
 Edit `password_whitelist.txt` — chat IDs allowed to request passwords from 1Password:
@@ -151,10 +174,12 @@ python main.py
 - [x] 1Password credential lookup
 - [x] SSH command execution via keys from 1Password
 - [x] SSH secret protection layer
+- [x] Homarr service status integration
 - [x] Confirmation gate for destructive actions
 - [x] Wildcard chat filtering
 - [ ] Proactive monitoring — alerts when a VM goes down unexpectedly
 - [ ] Minecraft RCON integration
+- [ ] Skills / plugin architecture (v2)
 - [ ] Migrate to local Ollama model after GPU upgrade
 
 ---
@@ -171,4 +196,4 @@ Apache 2.0 — see [LICENSE](LICENSE) for details.
 
 ---
 
-> Built to make home infrastructure effortless.
+> Built for homelabbers who want an AI that actually knows their infrastructure.

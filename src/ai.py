@@ -111,6 +111,28 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "get_service_status",
+            "description": "Check if a specific service or app is online by pinging it via Homarr. Use when the user asks if a specific service is up, running, or reachable.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Name of the service or app to check, e.g. 'Plex', 'Nextcloud', 'Jellyfin'"}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_all_services_status",
+            "description": "Check the status of all services and apps configured in Homarr. Use when the user asks for an overview of all services or wants to know what's up or down.",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "lxc_exec",
             "description": "Execute a shell command inside an LXC container.",
             "parameters": {
@@ -228,6 +250,12 @@ def _execute_tool(name: str, args: dict, chat_id: str = "", password_whitelist: 
             if result.startswith("SUCCESS"):
                 return result + " — command completed, report this output to the user now, do not call any more tools."
             return result
+        elif name == "get_service_status":
+            from src.homarr import get_app_status
+            return get_app_status(query=args["query"])
+        elif name == "get_all_services_status":
+            from src.homarr import get_app_status
+            return get_app_status(query=None)
         elif name == "lxc_exec":
             result = lxc_exec(node="pve", vmid=args["vmid"], command=args["command"])
             return f"SUCCESS: Exec result: {result}"

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HelpeX</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            height: 100vh;
+            display: flex;
+        }
+        .sidebar {
+            width: 280px;
+            background: #16213e;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+        .sidebar h1 {
+            font-size: 24px;
+            margin-bottom: 20px;
+            color: #0f3460;
+        }
+        .sidebar h1 span { color: #e94560; }
+        .skills { flex: 1; }
+        .skills h2 {
+            font-size: 14px;
+            text-transform: uppercase;
+            color: #888;
+            margin-bottom: 10px;
+        }
+        .skill-btn {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 8px;
+            background: #0f3460;
+            border: none;
+            border-radius: 6px;
+            color: #fff;
+            cursor: pointer;
+            text-align: left;
+            transition: background 0.2s;
+        }
+        .skill-btn:hover { background: #e94560; }
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        .feed {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        .message {
+            background: #16213e;
+            padding: 12px 16px;
+            margin-bottom: 8px;
+            border-radius: 8px;
+            border-left: 3px solid #0f3460;
+        }
+        .message.inbound { border-left-color: #4ecca3; }
+        .message.outbound { border-left-color: #e94560; }
+        .message .meta {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 4px;
+        }
+        .canvas-container {
+            height: 200px;
+            background: #0f3460;
+            border-top: 1px solid #333;
+        }
+        canvas { width: 100%; height: 100%; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h1>Helpe<span>X</span></h1>
+        <div class="skills">
+            <h2>Skills</h2>
+            <div id="skills-list"></div>
+        </div>
+    </div>
+    <div class="main">
+        <div class="feed" id="feed"></div>
+        <div class="canvas-container">
+            <canvas id="output"></canvas>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        const socket = io();
+        const feed = document.getElementById('feed');
+
+        socket.on('connected', () => console.log('Connected to HelpeX'));
+
+        socket.on('new_message', (msg) => {
+            const div = document.createElement('div');
+            div.className = `message ${msg.type}`;
+            div.innerHTML = `
+                <div class="meta">${msg.source || msg.type} • <span class="time"></span></div>
+                <div class="content">${msg.content}</div>
+            `;
+            feed.appendChild(div);
+            feed.scrollTop = feed.scrollHeight;
+        });
+
+        // Load skills
+        fetch('/api/skills').then(r => r.json()).then(skills => {
+            const list = document.getElementById('skills-list');
+            skills.forEach(skill => {
+                const btn = document.createElement('button');
+                btn.className = 'skill-btn';
+                btn.textContent = skill.name;
+                btn.title = skill.description;
+                btn.onclick = () => fetch(`/api/skills/${skill.name}/run`, {method: 'POST'});
+                list.appendChild(btn);
+            });
+        });
+
+        // Load existing messages
+        fetch('/api/messages').then(r => r.json()).then(msgs => {
+            msgs.forEach(msg => {
+                const div = document.createElement('div');
+                div.className = `message ${msg.type}`;
+                div.innerHTML = `<div class="meta">${msg.source || msg.type}</div><div class="content">${msg.content}</div>`;
+                feed.appendChild(div);
+            });
+        });
+    </script>
+</body>
+</html>

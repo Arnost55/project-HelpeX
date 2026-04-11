@@ -18,6 +18,7 @@ It doesn't feel like a bot. It feels like you, but always online.
 - 🖥️ **Proxmox control** — Start, stop, reboot VMs and LXC containers by name or ID
 - 🔒 **1Password integration** — Looks up credentials from your vault on request
 - 🔑 **SSH execution** — Runs shell commands on remote servers using keys stored in 1Password
+- 📊 **Homarr integration** — Checks service/app status by pinging via your Homarr dashboard
 - 🧠 **Agentic tool loop** — Chains multiple tool calls automatically to complete complex tasks
 - 🗂️ **Per-chat memory** — Maintains conversation history per chat for context-aware replies
 - 🌍 **Multilingual** — Replies in Slovak, Czech, or English depending on who's writing
@@ -48,7 +49,8 @@ project-HelpeX/
     ├── beeper.py            # Beeper API client
     ├── memory.py            # per-chat conversation history
     ├── proxmox.py           # Proxmox REST API + SSH exec
-    └── onepassword.py       # 1Password SDK integration
+    ├── onepassword.py       # 1Password SDK integration
+    └── homarr.py            # Homarr app/service status checks
 ```
 
 ---

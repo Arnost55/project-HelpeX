@@ -1,19 +1,8 @@
-# Secrets and config
+node_modules/
+dist/
 .env
-stable/.env
-chats_whitelist.txt
-stable/chats_whitelist.txt
-password_whitelist.txt
-stable/password_whitelist.txt
-topic_whitelist.txt
-stable/topic_whitelist.txt
-chats.json
-stable/chats.json
-openclaw/
-
-# Python
-**/__pycache__/
-**/*.pyc
-
-# Misc
-1.0.zip
+.DS_Store
+target/
+src-tauri/target/
+src-tauri/gen/
+JARVIS_*

@@ -1,9 +1,0 @@
-httpx
-groq
-python-dotenv
-onepassword-sdk
-flask
-flask-socketio
-pyyaml
-fuzzywuzzy
-python-Levenshtein

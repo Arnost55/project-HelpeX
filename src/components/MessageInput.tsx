@@ -5,16 +5,24 @@ export default function MessageInput(props: {
   onSubmit: (text: string) => Promise<void>;
 }): JSX.Element {
   const [text, setText] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     const value = text.trim();
-    if (!value || props.disabled) {
+    if (!value || props.disabled || isSubmitting) {
       return;
     }
 
-    setText("");
-    await props.onSubmit(value);
+    try {
+      setIsSubmitting(true);
+      await props.onSubmit(value);
+      setText("");
+    } catch {
+      return;
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -24,10 +32,10 @@ export default function MessageInput(props: {
         onChange={(event) => setText(event.target.value)}
         placeholder="Ask JARVIS anything..."
         rows={3}
-        disabled={props.disabled}
+        disabled={props.disabled || isSubmitting}
       />
-      <button type="submit" disabled={props.disabled || text.trim().length === 0}>
-        {props.disabled ? "Streaming..." : "Send"}
+      <button type="submit" disabled={props.disabled || isSubmitting || text.trim().length === 0}>
+        {props.disabled || isSubmitting ? "Streaming..." : "Send"}
       </button>
     </form>
   );

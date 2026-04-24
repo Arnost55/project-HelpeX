@@ -13,11 +13,35 @@ interface OpenAIChunk {
   choices?: OpenAIChunkChoice[];
 }
 
+interface OpenAIErrorPayload {
+  error?: {
+    message?: string;
+  };
+}
+
+function getErrorMessage(errorText: string): string {
+  if (!errorText.trim()) {
+    return "OpenAI request failed";
+  }
+
+  try {
+    const payload = JSON.parse(errorText) as OpenAIErrorPayload;
+    if (payload.error?.message) {
+      return payload.error.message;
+    }
+  } catch {
+    return errorText;
+  }
+
+  return errorText;
+}
+
 export async function streamOpenAiResponse(params: {
   apiKey: string;
   model: string;
   messages: Message[];
   onToken: (token: string) => void;
+  signal?: AbortSignal;
 }): Promise<void> {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -25,6 +49,7 @@ export async function streamOpenAiResponse(params: {
       Authorization: `Bearer ${params.apiKey}`,
       "Content-Type": "application/json"
     },
+    signal: params.signal,
     body: JSON.stringify({
       model: params.model,
       stream: true,
@@ -37,7 +62,7 @@ export async function streamOpenAiResponse(params: {
 
   if (!response.ok || !response.body) {
     const errorText = await response.text();
-    throw new Error(errorText || "OpenAI request failed");
+    throw new Error(getErrorMessage(errorText));
   }
 
   const reader = response.body.getReader();

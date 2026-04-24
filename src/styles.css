@@ -95,6 +95,9 @@ body {
 .chat-topbar {
   padding: 16px;
   border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .chat-topbar h2 {
@@ -105,6 +108,20 @@ body {
   margin: 4px 0 0;
   color: #64748b;
   font-size: 0.9rem;
+}
+
+.stop-button {
+  border: 1px solid #fecaca;
+  background: #fff1f2;
+  color: #be123c;
+  border-radius: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.stop-button:hover {
+  background: #ffe4e6;
 }
 
 .error-banner {
@@ -146,6 +163,34 @@ body {
 
 .message.assistant {
   background: #f8fafc;
+}
+
+.streaming-indicator p {
+  position: relative;
+  width: fit-content;
+  color: #475569;
+}
+
+.streaming-indicator p::after {
+  content: "";
+  display: inline-block;
+  width: 1ch;
+  animation: blinkDots 1.2s steps(1, end) infinite;
+}
+
+@keyframes blinkDots {
+  0% {
+    content: "";
+  }
+  33% {
+    content: ".";
+  }
+  66% {
+    content: "..";
+  }
+  100% {
+    content: "...";
+  }
 }
 
 .message header {

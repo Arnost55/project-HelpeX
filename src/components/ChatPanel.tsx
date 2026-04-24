@@ -6,6 +6,7 @@ import { useSettingsStore } from "../store/settingsStore";
 import { createId } from "../utils/id";
 import { streamOpenAiResponse } from "../api/openai";
 import { saveConversation, saveMessage } from "../api/tauriDb";
+import { estimateConversationTokens } from "../utils/tokens";
 
 export default function ChatPanel(): JSX.Element {
   const conversations = useChatStore((state) => state.conversations);
@@ -19,6 +20,7 @@ export default function ChatPanel(): JSX.Element {
   const apiKey = useSettingsStore((state) => state.openAiApiKey);
   const model = useSettingsStore((state) => state.model);
   const [error, setError] = useState<string | null>(null);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
 
   const activeConversation = useMemo(() => {
     if (activeConversationId) {
@@ -27,6 +29,14 @@ export default function ChatPanel(): JSX.Element {
 
     return conversations[0] ?? null;
   }, [activeConversationId, conversations]);
+
+  const conversationTokenEstimate = useMemo(() => {
+    if (!activeConversation) {
+      return 0;
+    }
+
+    return estimateConversationTokens(activeConversation.messages);
+  }, [activeConversation]);
 
   useEffect(() => {
     if (activeConversation && !activeConversationId) {
@@ -41,7 +51,7 @@ export default function ChatPanel(): JSX.Element {
 
     if (!apiKey) {
       setError("Set your OpenAI API key in Settings before sending messages.");
-      return;
+      throw new Error("Missing API key");
     }
 
     setError(null);
@@ -55,6 +65,9 @@ export default function ChatPanel(): JSX.Element {
     });
 
     try {
+      const controller = new AbortController();
+      setAbortController(controller);
+
       const refreshedConvo = useChatStore
         .getState()
         .conversations.find((conversation) => conversation.id === activeConversation.id);
@@ -77,6 +90,7 @@ export default function ChatPanel(): JSX.Element {
         apiKey,
         model,
         messages: latestConversation.messages,
+        signal: controller.signal,
         onToken: (token) => {
           appendAssistantToken(activeConversation.id, token);
         }
@@ -94,7 +108,12 @@ export default function ChatPanel(): JSX.Element {
         }
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
+      const aborted = err instanceof DOMException && err.name === "AbortError";
+      const message = aborted
+        ? "Generation stopped."
+        : err instanceof Error
+          ? err.message
+          : "Unknown error";
       setError(message);
 
       const postErrorConvo = useChatStore
@@ -108,9 +127,15 @@ export default function ChatPanel(): JSX.Element {
           await saveMessage({ ...latestAssistant, conversationId: postErrorConvo.id });
         }
       }
+
     } finally {
+      setAbortController(null);
       stopStreaming();
     }
+  }
+
+  function handleStop(): void {
+    abortController?.abort();
   }
 
   return (
@@ -118,13 +143,20 @@ export default function ChatPanel(): JSX.Element {
       <header className="chat-topbar">
         <div>
           <h2>{activeConversation?.title ?? "No conversation"}</h2>
-          <p>Model: {model}</p>
+          <p>
+            Model: {model} | Messages: {activeConversation?.messages.length ?? 0} | Est. tokens: {conversationTokenEstimate}
+          </p>
         </div>
+        {isStreaming ? (
+          <button type="button" className="stop-button" onClick={handleStop}>
+            Stop
+          </button>
+        ) : null}
       </header>
 
       {error ? <div className="error-banner">{error}</div> : null}
 
-      <MessageList messages={activeConversation?.messages ?? []} />
+      <MessageList messages={activeConversation?.messages ?? []} isStreaming={isStreaming} />
       <MessageInput disabled={isStreaming} onSubmit={handleSend} />
     </section>
   );

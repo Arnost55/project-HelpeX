@@ -1,6 +1,9 @@
 import type { Message } from "../types/chat";
 
-export default function MessageList(props: { messages: Message[] }): JSX.Element {
+export default function MessageList(props: { messages: Message[]; isStreaming: boolean }): JSX.Element {
+  const lastMessage = props.messages[props.messages.length - 1];
+  const showTypingIndicator = props.isStreaming && (!lastMessage || lastMessage.role !== "assistant");
+
   if (props.messages.length === 0) {
     return (
       <div className="empty-state">
@@ -18,6 +21,12 @@ export default function MessageList(props: { messages: Message[] }): JSX.Element
           <p>{message.content}</p>
         </article>
       ))}
+      {showTypingIndicator ? (
+        <article className="message assistant streaming-indicator">
+          <header>JARVIS</header>
+          <p>Thinking</p>
+        </article>
+      ) : null}
     </div>
   );
 }

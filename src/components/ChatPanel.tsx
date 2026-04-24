@@ -1,12 +1,27 @@
 import { useEffect, useMemo, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import MessageList from "./MessageList";
 import MessageInput from "./MessageInput";
 import { useChatStore } from "../store/chatStore";
 import { useSettingsStore } from "../store/settingsStore";
 import { createId } from "../utils/id";
-import { streamOpenAiResponse } from "../api/openai";
 import { saveConversation, saveMessage } from "../api/tauriDb";
 import { estimateConversationTokens } from "../utils/tokens";
+
+interface StreamChunkEvent {
+  streamId: string;
+  token: string;
+}
+
+interface StreamDoneEvent {
+  streamId: string;
+}
+
+interface StreamErrorEvent {
+  streamId: string;
+  message: string;
+}
 
 export default function ChatPanel(): JSX.Element {
   const conversations = useChatStore((state) => state.conversations);
@@ -20,7 +35,7 @@ export default function ChatPanel(): JSX.Element {
   const apiKey = useSettingsStore((state) => state.openAiApiKey);
   const model = useSettingsStore((state) => state.model);
   const [error, setError] = useState<string | null>(null);
-  const [abortController, setAbortController] = useState<AbortController | null>(null);
+  const [activeStreamId, setActiveStreamId] = useState<string | null>(null);
 
   const activeConversation = useMemo(() => {
     if (activeConversationId) {
@@ -44,6 +59,14 @@ export default function ChatPanel(): JSX.Element {
     }
   }, [activeConversation, activeConversationId, setActiveConversation]);
 
+  useEffect(() => {
+    return () => {
+      if (activeStreamId) {
+        void invoke("cancel_openai_stream", { streamId: activeStreamId, stream_id: activeStreamId });
+      }
+    };
+  }, [activeStreamId]);
+
   async function handleSend(text: string): Promise<void> {
     if (!activeConversation) {
       return;
@@ -52,6 +75,12 @@ export default function ChatPanel(): JSX.Element {
     if (!apiKey) {
       setError("Set your OpenAI API key in Settings before sending messages.");
       throw new Error("Missing API key");
+    }
+
+    const trimmedApiKey = apiKey.trim();
+    if (!trimmedApiKey.startsWith("sk-")) {
+      setError("OpenAI API key format looks invalid. It should start with 'sk-'.");
+      throw new Error("Invalid API key format");
     }
 
     setError(null);
@@ -65,8 +94,8 @@ export default function ChatPanel(): JSX.Element {
     });
 
     try {
-      const controller = new AbortController();
-      setAbortController(controller);
+      const streamId = createId("stream");
+      setActiveStreamId(streamId);
 
       const refreshedConvo = useChatStore
         .getState()
@@ -86,15 +115,58 @@ export default function ChatPanel(): JSX.Element {
           .getState()
           .conversations.find((conversation) => conversation.id === activeConversation.id) ?? activeConversation;
 
-      await streamOpenAiResponse({
-        apiKey,
-        model,
-        messages: latestConversation.messages,
-        signal: controller.signal,
-        onToken: (token) => {
-          appendAssistantToken(activeConversation.id, token);
+      const streamCompletion = new Promise<void>(async (resolve, reject) => {
+        const unlistenChunk = await listen<StreamChunkEvent>("chat-stream-chunk", (event) => {
+          if (event.payload.streamId !== streamId) {
+            return;
+          }
+
+          appendAssistantToken(activeConversation.id, event.payload.token);
+        });
+
+        const unlistenDone = await listen<StreamDoneEvent>("chat-stream-done", (event) => {
+          if (event.payload.streamId !== streamId) {
+            return;
+          }
+
+          unlistenChunk();
+          unlistenDone();
+          unlistenError();
+          resolve();
+        });
+
+        const unlistenError = await listen<StreamErrorEvent>("chat-stream-error", (event) => {
+          if (event.payload.streamId !== streamId) {
+            return;
+          }
+
+          unlistenChunk();
+          unlistenDone();
+          unlistenError();
+          reject(new Error(event.payload.message));
+        });
+
+        try {
+          await invoke("stream_openai_chat", {
+            request: {
+              streamId,
+              apiKey: trimmedApiKey,
+              model,
+              messages: latestConversation.messages.map((message) => ({
+                role: message.role,
+                content: message.content
+              }))
+            }
+          });
+        } catch (invokeError) {
+          unlistenChunk();
+          unlistenDone();
+          unlistenError();
+          reject(invokeError instanceof Error ? invokeError : new Error("Failed to start stream"));
         }
       });
+
+      await streamCompletion;
 
       const postStreamConvo = useChatStore
         .getState()
@@ -108,10 +180,7 @@ export default function ChatPanel(): JSX.Element {
         }
       }
     } catch (err) {
-      const aborted = err instanceof DOMException && err.name === "AbortError";
-      const message = aborted
-        ? "Generation stopped."
-        : err instanceof Error
+      const message = err instanceof Error
           ? err.message
           : "Unknown error";
       setError(message);
@@ -129,13 +198,18 @@ export default function ChatPanel(): JSX.Element {
       }
 
     } finally {
-      setAbortController(null);
+      setActiveStreamId(null);
       stopStreaming();
     }
   }
 
   function handleStop(): void {
-    abortController?.abort();
+    if (!activeStreamId) {
+      return;
+    }
+
+    setError("Generation stopped.");
+    void invoke("cancel_openai_stream", { streamId: activeStreamId, stream_id: activeStreamId });
   }
 
   return (

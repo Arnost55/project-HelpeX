@@ -18,7 +18,9 @@ pub fn run() {
             commands::save_conversation,
             commands::save_message,
             commands::list_conversations,
-            commands::list_messages
+            commands::list_messages,
+            commands::stream_openai_chat,
+            commands::cancel_openai_stream
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

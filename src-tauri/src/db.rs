@@ -30,25 +30,54 @@ fn connect(app: &tauri::AppHandle) -> Result<Connection, AppError> {
 pub fn init(app: &tauri::AppHandle) -> Result<(), AppError> {
     let conn = connect(app)?;
 
-    conn.execute_batch(
-        "
-        CREATE TABLE IF NOT EXISTS conversations (
-            id TEXT PRIMARY KEY,
-            title TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        );
+    let current_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
 
-        CREATE TABLE IF NOT EXISTS messages (
-            id TEXT PRIMARY KEY,
-            conversation_id TEXT NOT NULL,
-            role TEXT NOT NULL,
-            content TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-        );
-        "
-    )?;
+    if current_version < 1 {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS messages (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+            );
+            "
+        )?;
+        conn.pragma_update(None, "user_version", 1)?;
+    }
+
+    let upgraded_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if upgraded_version < 2 {
+        conn.execute_batch(
+            "
+            ALTER TABLE conversations ADD COLUMN message_count INTEGER DEFAULT 0;
+            ALTER TABLE messages ADD COLUMN model TEXT;
+            ALTER TABLE messages ADD COLUMN tokens_est INTEGER DEFAULT 0;
+            "
+        )
+        .ok();
+
+        conn.execute(
+            "
+            UPDATE conversations
+            SET message_count = (
+                SELECT COUNT(*) FROM messages WHERE messages.conversation_id = conversations.id
+            )
+            ",
+            [],
+        )?;
+
+        conn.pragma_update(None, "user_version", 2)?;
+    }
 
     Ok(())
 }
@@ -70,6 +99,7 @@ pub fn save_conversation(app: &tauri::AppHandle, convo: Conversation) -> Result<
 
 pub fn save_message(app: &tauri::AppHandle, message: Message) -> Result<(), AppError> {
     let conn = connect(app)?;
+    let conversation_id = message.conversation_id.clone();
     conn.execute(
         "
         INSERT INTO messages (id, conversation_id, role, content, created_at)
@@ -87,6 +117,22 @@ pub fn save_message(app: &tauri::AppHandle, message: Message) -> Result<(), AppE
             message.created_at
         ],
     )?;
+
+    conn.execute(
+        "
+        UPDATE conversations
+        SET
+            message_count = (
+                SELECT COUNT(*)
+                FROM messages
+                WHERE messages.conversation_id = conversations.id
+            ),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?1
+        ",
+        [conversation_id],
+    )?;
+
     Ok(())
 }
 

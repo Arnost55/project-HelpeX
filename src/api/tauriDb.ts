@@ -1,6 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Conversation, Message } from "../types/chat";
 
+type PersistableMessage = Omit<Message, "conversationId"> & {
+  conversationId: string;
+};
+
 export async function saveConversation(conversation: Conversation): Promise<void> {
   await invoke("save_conversation", {
     conversation: {
@@ -12,14 +16,14 @@ export async function saveConversation(conversation: Conversation): Promise<void
   });
 }
 
-export async function saveMessage(message: Message & { conversation_id?: string }): Promise<void> {
+export async function saveMessage(message: PersistableMessage): Promise<void> {
   await invoke("save_message", {
     message: {
       id: message.id,
       created_at: message.createdAt,
       role: message.role,
       content: message.content,
-      conversation_id: message.conversation_id ?? message.conversationId
+      conversation_id: message.conversationId
     }
   });
 }

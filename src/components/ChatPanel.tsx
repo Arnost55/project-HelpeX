@@ -54,19 +54,19 @@ export default function ChatPanel(): JSX.Element {
       conversationId: activeConversation.id
     });
 
-    const refreshedConvo = useChatStore
-      .getState()
-      .conversations.find((conversation) => conversation.id === activeConversation.id);
-
-    if (refreshedConvo) {
-      await saveConversation(refreshedConvo);
-      const latestUserMessage = refreshedConvo.messages[refreshedConvo.messages.length - 1];
-      if (latestUserMessage) {
-        await saveMessage({ ...latestUserMessage, conversationId: refreshedConvo.id });
-      }
-    }
-
     try {
+      const refreshedConvo = useChatStore
+        .getState()
+        .conversations.find((conversation) => conversation.id === activeConversation.id);
+
+      if (refreshedConvo) {
+        await saveConversation(refreshedConvo);
+        const latestUserMessage = refreshedConvo.messages[refreshedConvo.messages.length - 1];
+        if (latestUserMessage) {
+          await saveMessage({ ...latestUserMessage, conversationId: refreshedConvo.id });
+        }
+      }
+
       startStreaming();
       const latestConversation =
         useChatStore
@@ -96,6 +96,18 @@ export default function ChatPanel(): JSX.Element {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       setError(message);
+
+      const postErrorConvo = useChatStore
+        .getState()
+        .conversations.find((conversation) => conversation.id === activeConversation.id);
+
+      if (postErrorConvo) {
+        await saveConversation(postErrorConvo);
+        const latestAssistant = postErrorConvo.messages[postErrorConvo.messages.length - 1];
+        if (latestAssistant && latestAssistant.role === "assistant") {
+          await saveMessage({ ...latestAssistant, conversationId: postErrorConvo.id });
+        }
+      }
     } finally {
       stopStreaming();
     }

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 use futures_util::StreamExt;
 use serde_json::Value;
@@ -8,8 +9,8 @@ use tauri::{AppHandle, Emitter};
 use crate::db;
 use crate::error::AppError;
 use crate::models::{
-    ChatStreamRequest, Conversation, Message, StreamChunkEvent, StreamDoneEvent, StreamErrorEvent,
-    StreamProviderEvent,
+    ChatStreamRequest, Conversation, Message, ProviderHealthResponse, ProviderRequest, StreamChunkEvent,
+    StreamDoneEvent, StreamErrorEvent, StreamProviderEvent,
 };
 
 static STREAM_CANCEL_REGISTRY: OnceLock<Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>> =
@@ -183,6 +184,114 @@ fn build_ollama_request_body(request: &ChatStreamRequest, model: &str) -> Value 
     }
 
     json
+}
+
+async fn fetch_openai_models(api_key: &str, base_url: Option<String>) -> Result<Vec<String>, AppError> {
+    let url = base_url
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "https://api.openai.com/v1/models".to_string());
+
+    let response = reqwest::Client::new()
+        .get(url)
+        .header("Authorization", format!("Bearer {}", api_key.trim()))
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_else(|_| "OpenAI model listing failed".to_string());
+        return Err(AppError::Network(parse_provider_error(&error_text)));
+    }
+
+    let payload = response.json::<Value>().await?;
+    let models = payload
+        .get("data")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.get("id").and_then(Value::as_str).map(ToString::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    Ok(models)
+}
+
+async fn fetch_claude_models(api_key: &str, base_url: Option<String>) -> Result<Vec<String>, AppError> {
+    let url = base_url
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "https://api.anthropic.com/v1/models".to_string());
+
+    let response = reqwest::Client::new()
+        .get(url)
+        .header("x-api-key", api_key.trim())
+        .header("anthropic-version", "2023-06-01")
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_else(|_| "Claude model listing failed".to_string());
+        return Err(AppError::Network(parse_provider_error(&error_text)));
+    }
+
+    let payload = response.json::<Value>().await?;
+    let models = payload
+        .get("data")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.get("id").and_then(Value::as_str).map(ToString::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    Ok(models)
+}
+
+async fn fetch_ollama_models(base_url: Option<String>) -> Result<Vec<String>, AppError> {
+    let base = base_url
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "http://127.0.0.1:11434".to_string());
+    let url = format!("{}/api/tags", base.trim_end_matches('/'));
+
+    let response = reqwest::Client::new().get(url).send().await?;
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_else(|_| "Ollama model listing failed".to_string());
+        return Err(AppError::Network(parse_provider_error(&error_text)));
+    }
+
+    let payload = response.json::<Value>().await?;
+    let models = payload
+        .get("models")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.get("name").and_then(Value::as_str).map(ToString::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    Ok(models)
+}
+
+fn build_health_response(provider: &str, started: Instant, result: Result<(), String>) -> ProviderHealthResponse {
+    let latency_ms = started.elapsed().as_millis();
+    match result {
+        Ok(()) => ProviderHealthResponse {
+            provider: provider.to_string(),
+            healthy: true,
+            message: "Connection OK".to_string(),
+            latency_ms,
+        },
+        Err(message) => ProviderHealthResponse {
+            provider: provider.to_string(),
+            healthy: false,
+            message,
+            latency_ms,
+        },
+    }
 }
 
 async fn create_provider_response(
@@ -484,4 +593,79 @@ pub fn cancel_chat_stream(stream_id: String) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn list_provider_models(request: ProviderRequest) -> Result<Vec<String>, String> {
+    match request.provider.as_str() {
+        "openai" => {
+            let api_key = request
+                .api_key
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "Missing OpenAI API key".to_string())?;
+
+            fetch_openai_models(&api_key, request.base_url)
+                .await
+                .map_err(|error| error.to_string())
+        }
+        "claude" => {
+            let api_key = request
+                .api_key
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "Missing Claude API key".to_string())?;
+
+            fetch_claude_models(&api_key, request.base_url)
+                .await
+                .map_err(|error| error.to_string())
+        }
+        "ollama" => fetch_ollama_models(request.base_url)
+            .await
+            .map_err(|error| error.to_string()),
+        _ => Err("Unsupported provider".to_string()),
+    }
+}
+
+#[tauri::command]
+pub async fn check_provider_health(request: ProviderRequest) -> Result<ProviderHealthResponse, String> {
+    let started = Instant::now();
+
+    let response = match request.provider.as_str() {
+        "openai" => {
+            let api_key = request
+                .api_key
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "Missing OpenAI API key".to_string())?;
+
+            let result = fetch_openai_models(&api_key, request.base_url)
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_string());
+
+            build_health_response("openai", started, result)
+        }
+        "claude" => {
+            let api_key = request
+                .api_key
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "Missing Claude API key".to_string())?;
+
+            let result = fetch_claude_models(&api_key, request.base_url)
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_string());
+
+            build_health_response("claude", started, result)
+        }
+        "ollama" => {
+            let result = fetch_ollama_models(request.base_url)
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_string());
+
+            build_health_response("ollama", started, result)
+        }
+        _ => return Err("Unsupported provider".to_string()),
+    };
+
+    Ok(response)
 }

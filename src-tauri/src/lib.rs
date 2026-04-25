@@ -20,7 +20,9 @@ pub fn run() {
             commands::list_conversations,
             commands::list_messages,
             commands::stream_chat,
-            commands::cancel_chat_stream
+            commands::cancel_chat_stream,
+            commands::list_provider_models,
+            commands::check_provider_health
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

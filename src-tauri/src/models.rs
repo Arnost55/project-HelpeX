@@ -69,3 +69,20 @@ pub struct StreamProviderEvent {
     pub model: String,
     pub fallback_used: bool,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderRequest {
+    pub provider: String,
+    pub api_key: Option<String>,
+    pub base_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderHealthResponse {
+    pub provider: String,
+    pub healthy: bool,
+    pub message: String,
+    pub latency_ms: u128,
+}

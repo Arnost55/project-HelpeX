@@ -1,4 +1,6 @@
+import { useMemo, useState } from "react";
 import { useSettingsStore } from "../store/settingsStore";
+import { checkProviderHealth, listProviderModels } from "../api/providers";
 
 export default function SettingsPanel(): JSX.Element {
   const provider = useSettingsStore((state) => state.provider);
@@ -19,6 +21,71 @@ export default function SettingsPanel(): JSX.Element {
   const setFallbackModel = useSettingsStore((state) => state.setFallbackModel);
   const setTemperature = useSettingsStore((state) => state.setTemperature);
   const setMaxTokens = useSettingsStore((state) => state.setMaxTokens);
+  const [providerHealth, setProviderHealth] = useState<string>("Not tested");
+  const [detectedModels, setDetectedModels] = useState<string[]>([]);
+  const [isCheckingHealth, setIsCheckingHealth] = useState(false);
+  const [isDetectingModels, setIsDetectingModels] = useState(false);
+
+  const currentApiKey = useMemo(() => {
+    if (provider === "openai") {
+      return openAiApiKey.trim();
+    }
+
+    if (provider === "claude") {
+      return claudeApiKey.trim();
+    }
+
+    return undefined;
+  }, [provider, openAiApiKey, claudeApiKey]);
+
+  const currentBaseUrl = useMemo(() => {
+    if (provider === "ollama") {
+      return ollamaBaseUrl.trim();
+    }
+
+    return undefined;
+  }, [provider, ollamaBaseUrl]);
+
+  async function handleCheckHealth(): Promise<void> {
+    setIsCheckingHealth(true);
+    try {
+      const health = await checkProviderHealth({
+        provider,
+        apiKey: currentApiKey,
+        baseUrl: currentBaseUrl
+      });
+
+      const status = health.healthy ? "healthy" : "unhealthy";
+      setProviderHealth(`${health.provider} is ${status} (${health.latencyMs}ms) - ${health.message}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown health check error";
+      setProviderHealth(message);
+    } finally {
+      setIsCheckingHealth(false);
+    }
+  }
+
+  async function handleDetectModels(): Promise<void> {
+    setIsDetectingModels(true);
+    try {
+      const models = await listProviderModels({
+        provider,
+        apiKey: currentApiKey,
+        baseUrl: currentBaseUrl
+      });
+
+      setDetectedModels(models);
+      if (models.length > 0 && !models.includes(model)) {
+        setModel(models[0]);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown model detection error";
+      setDetectedModels([]);
+      setProviderHealth(message);
+    } finally {
+      setIsDetectingModels(false);
+    }
+  }
 
   return (
     <aside className="settings-panel">
@@ -65,12 +132,33 @@ export default function SettingsPanel(): JSX.Element {
 
       <label>
         Model
-        <select value={model} onChange={(event) => setModel(event.target.value)}>
-          <option value="gpt-4o-mini">gpt-4o-mini</option>
-          <option value="gpt-4o">gpt-4o</option>
-          <option value="gpt-4.1-mini">gpt-4.1-mini</option>
-        </select>
+        {detectedModels.length > 0 ? (
+          <select value={model} onChange={(event) => setModel(event.target.value)}>
+            {detectedModels.map((modelName) => (
+              <option key={modelName} value={modelName}>
+                {modelName}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            type="text"
+            value={model}
+            onChange={(event) => setModel(event.target.value)}
+            placeholder="Type model name"
+          />
+        )}
       </label>
+
+      <button type="button" onClick={handleCheckHealth} disabled={isCheckingHealth}>
+        {isCheckingHealth ? "Checking..." : "Check Provider Health"}
+      </button>
+
+      <button type="button" onClick={handleDetectModels} disabled={isDetectingModels}>
+        {isDetectingModels ? "Detecting..." : "Auto Detect Models"}
+      </button>
+
+      <p>{providerHealth}</p>
 
       <label>
         Fallback Provider

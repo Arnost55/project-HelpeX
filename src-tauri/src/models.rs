@@ -26,10 +26,18 @@ pub struct ChatInputMessage {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OpenAiStreamRequest {
+pub struct ChatStreamRequest {
     pub stream_id: String,
-    pub api_key: String,
+    pub provider: String,
     pub model: String,
+    pub api_key: Option<String>,
+    pub base_url: Option<String>,
+    pub temperature: Option<f32>,
+    pub max_tokens: Option<u32>,
+    pub fallback_provider: Option<String>,
+    pub fallback_model: Option<String>,
+    pub fallback_api_key: Option<String>,
+    pub fallback_base_url: Option<String>,
     pub messages: Vec<ChatInputMessage>,
 }
 
@@ -51,4 +59,13 @@ pub struct StreamDoneEvent {
 pub struct StreamErrorEvent {
     pub stream_id: String,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamProviderEvent {
+    pub stream_id: String,
+    pub provider: String,
+    pub model: String,
+    pub fallback_used: bool,
 }

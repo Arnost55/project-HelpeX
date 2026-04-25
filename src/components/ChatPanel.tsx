@@ -23,6 +23,13 @@ interface StreamErrorEvent {
   message: string;
 }
 
+interface StreamProviderEvent {
+  streamId: string;
+  provider: string;
+  model: string;
+  fallbackUsed: boolean;
+}
+
 export default function ChatPanel(): JSX.Element {
   const conversations = useChatStore((state) => state.conversations);
   const activeConversationId = useChatStore((state) => state.activeConversationId);
@@ -32,10 +39,18 @@ export default function ChatPanel(): JSX.Element {
   const startStreaming = useChatStore((state) => state.startStreaming);
   const stopStreaming = useChatStore((state) => state.stopStreaming);
   const isStreaming = useChatStore((state) => state.isStreaming);
+  const provider = useSettingsStore((state) => state.provider);
   const apiKey = useSettingsStore((state) => state.openAiApiKey);
+  const claudeApiKey = useSettingsStore((state) => state.claudeApiKey);
+  const ollamaBaseUrl = useSettingsStore((state) => state.ollamaBaseUrl);
   const model = useSettingsStore((state) => state.model);
+  const fallbackProvider = useSettingsStore((state) => state.fallbackProvider);
+  const fallbackModel = useSettingsStore((state) => state.fallbackModel);
+  const temperature = useSettingsStore((state) => state.temperature);
+  const maxTokens = useSettingsStore((state) => state.maxTokens);
   const [error, setError] = useState<string | null>(null);
   const [activeStreamId, setActiveStreamId] = useState<string | null>(null);
+  const [activeStreamProvider, setActiveStreamProvider] = useState<string | null>(null);
 
   const activeConversation = useMemo(() => {
     if (activeConversationId) {
@@ -62,7 +77,7 @@ export default function ChatPanel(): JSX.Element {
   useEffect(() => {
     return () => {
       if (activeStreamId) {
-        void invoke("cancel_openai_stream", { streamId: activeStreamId, stream_id: activeStreamId });
+        void invoke("cancel_chat_stream", { streamId: activeStreamId, stream_id: activeStreamId });
       }
     };
   }, [activeStreamId]);
@@ -72,15 +87,28 @@ export default function ChatPanel(): JSX.Element {
       return;
     }
 
-    if (!apiKey) {
-      setError("Set your OpenAI API key in Settings before sending messages.");
-      throw new Error("Missing API key");
+    if (provider === "openai") {
+      const trimmedApiKey = apiKey.trim();
+      if (!trimmedApiKey) {
+        setError("Set your OpenAI API key in Settings before sending messages.");
+        throw new Error("Missing OpenAI API key");
+      }
     }
 
-    const trimmedApiKey = apiKey.trim();
-    if (!trimmedApiKey.startsWith("sk-")) {
-      setError("OpenAI API key format looks invalid. It should start with 'sk-'.");
-      throw new Error("Invalid API key format");
+    if (provider === "claude") {
+      const trimmedApiKey = claudeApiKey.trim();
+      if (!trimmedApiKey) {
+        setError("Set your Claude API key in Settings before sending messages.");
+        throw new Error("Missing Claude API key");
+      }
+    }
+
+    if (provider === "ollama") {
+      const trimmedBaseUrl = ollamaBaseUrl.trim();
+      if (!trimmedBaseUrl) {
+        setError("Set your Ollama URL in Settings before sending messages.");
+        throw new Error("Missing Ollama base URL");
+      }
     }
 
     setError(null);
@@ -96,6 +124,7 @@ export default function ChatPanel(): JSX.Element {
     try {
       const streamId = createId("stream");
       setActiveStreamId(streamId);
+      setActiveStreamProvider(null);
 
       const refreshedConvo = useChatStore
         .getState()
@@ -116,7 +145,38 @@ export default function ChatPanel(): JSX.Element {
           .conversations.find((conversation) => conversation.id === activeConversation.id) ?? activeConversation;
 
       const streamCompletion = new Promise<void>(async (resolve, reject) => {
-        const unlistenChunk = await listen<StreamChunkEvent>("chat-stream-chunk", (event) => {
+        let settled = false;
+        let unlistenChunk: () => void = () => {};
+        let unlistenDone: () => void = () => {};
+        let unlistenError: () => void = () => {};
+        let unlistenProvider: () => void = () => {};
+
+        const cleanup = () => {
+          unlistenChunk();
+          unlistenDone();
+          unlistenError();
+          unlistenProvider();
+        };
+
+        const resolveOnce = () => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          cleanup();
+          resolve();
+        };
+
+        const rejectOnce = (error: Error) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          cleanup();
+          reject(error);
+        };
+
+        unlistenChunk = await listen<StreamChunkEvent>("chat-stream-chunk", (event) => {
           if (event.payload.streamId !== streamId) {
             return;
           }
@@ -124,34 +184,52 @@ export default function ChatPanel(): JSX.Element {
           appendAssistantToken(activeConversation.id, event.payload.token);
         });
 
-        const unlistenDone = await listen<StreamDoneEvent>("chat-stream-done", (event) => {
+        unlistenDone = await listen<StreamDoneEvent>("chat-stream-done", (event) => {
           if (event.payload.streamId !== streamId) {
             return;
           }
 
-          unlistenChunk();
-          unlistenDone();
-          unlistenError();
-          resolve();
+          resolveOnce();
         });
 
-        const unlistenError = await listen<StreamErrorEvent>("chat-stream-error", (event) => {
+        unlistenError = await listen<StreamErrorEvent>("chat-stream-error", (event) => {
           if (event.payload.streamId !== streamId) {
             return;
           }
 
-          unlistenChunk();
-          unlistenDone();
-          unlistenError();
-          reject(new Error(event.payload.message));
+          rejectOnce(new Error(event.payload.message));
+        });
+
+        unlistenProvider = await listen<StreamProviderEvent>("chat-stream-provider", (event) => {
+          if (event.payload.streamId !== streamId) {
+            return;
+          }
+
+          const providerLabel = event.payload.fallbackUsed
+            ? `${event.payload.provider} (fallback)`
+            : event.payload.provider;
+          setActiveStreamProvider(`${providerLabel} • ${event.payload.model}`);
         });
 
         try {
-          await invoke("stream_openai_chat", {
+          await invoke("stream_chat", {
             request: {
               streamId,
-              apiKey: trimmedApiKey,
+              provider,
               model,
+              apiKey: provider === "openai" ? apiKey.trim() : provider === "claude" ? claudeApiKey.trim() : undefined,
+              baseUrl: provider === "ollama" ? ollamaBaseUrl.trim() : undefined,
+              temperature,
+              maxTokens,
+              fallbackProvider,
+              fallbackModel,
+              fallbackApiKey:
+                fallbackProvider === "openai"
+                  ? apiKey.trim()
+                  : fallbackProvider === "claude"
+                    ? claudeApiKey.trim()
+                    : undefined,
+              fallbackBaseUrl: fallbackProvider === "ollama" ? ollamaBaseUrl.trim() : undefined,
               messages: latestConversation.messages.map((message) => ({
                 role: message.role,
                 content: message.content
@@ -159,10 +237,7 @@ export default function ChatPanel(): JSX.Element {
             }
           });
         } catch (invokeError) {
-          unlistenChunk();
-          unlistenDone();
-          unlistenError();
-          reject(invokeError instanceof Error ? invokeError : new Error("Failed to start stream"));
+          rejectOnce(invokeError instanceof Error ? invokeError : new Error("Failed to start stream"));
         }
       });
 
@@ -199,6 +274,7 @@ export default function ChatPanel(): JSX.Element {
 
     } finally {
       setActiveStreamId(null);
+      setActiveStreamProvider(null);
       stopStreaming();
     }
   }
@@ -209,7 +285,7 @@ export default function ChatPanel(): JSX.Element {
     }
 
     setError("Generation stopped.");
-    void invoke("cancel_openai_stream", { streamId: activeStreamId, stream_id: activeStreamId });
+    void invoke("cancel_chat_stream", { streamId: activeStreamId, stream_id: activeStreamId });
   }
 
   return (
@@ -218,8 +294,9 @@ export default function ChatPanel(): JSX.Element {
         <div>
           <h2>{activeConversation?.title ?? "No conversation"}</h2>
           <p>
-            Model: {model} | Messages: {activeConversation?.messages.length ?? 0} | Est. tokens: {conversationTokenEstimate}
+            Provider: {provider} | Model: {model} | Messages: {activeConversation?.messages.length ?? 0} | Est. tokens: {conversationTokenEstimate}
           </p>
+          {activeStreamProvider ? <p>Streaming via {activeStreamProvider}</p> : null}
         </div>
         {isStreaming ? (
           <button type="button" className="stop-button" onClick={handleStop}>

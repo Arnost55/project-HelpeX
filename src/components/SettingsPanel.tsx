@@ -25,6 +25,8 @@ export default function SettingsPanel(): JSX.Element {
   const [detectedModels, setDetectedModels] = useState<string[]>([]);
   const [isCheckingHealth, setIsCheckingHealth] = useState(false);
   const [isDetectingModels, setIsDetectingModels] = useState(false);
+  const [fallbackDetectedModels, setFallbackDetectedModels] = useState<string[]>([]);
+  const [isDetectingFallbackModels, setIsDetectingFallbackModels] = useState(false);
 
   const currentApiKey = useMemo(() => {
     if (provider === "openai") {
@@ -84,6 +86,41 @@ export default function SettingsPanel(): JSX.Element {
       setProviderHealth(message);
     } finally {
       setIsDetectingModels(false);
+    }
+  }
+
+  async function handleDetectFallbackModels(): Promise<void> {
+    if (fallbackProvider === "none") {
+      setFallbackDetectedModels([]);
+      return;
+    }
+
+    setIsDetectingFallbackModels(true);
+    try {
+      const fallbackApiKey =
+        fallbackProvider === "openai"
+          ? openAiApiKey.trim()
+          : fallbackProvider === "claude"
+            ? claudeApiKey.trim()
+            : undefined;
+      const fallbackBaseUrl = fallbackProvider === "ollama" ? ollamaBaseUrl.trim() : undefined;
+
+      const models = await listProviderModels({
+        provider: fallbackProvider,
+        apiKey: fallbackApiKey,
+        baseUrl: fallbackBaseUrl
+      });
+
+      setFallbackDetectedModels(models);
+      if (models.length > 0 && !models.includes(fallbackModel)) {
+        setFallbackModel(models[0]);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown fallback model detection error";
+      setFallbackDetectedModels([]);
+      setProviderHealth(message);
+    } finally {
+      setIsDetectingFallbackModels(false);
     }
   }
 
@@ -177,13 +214,31 @@ export default function SettingsPanel(): JSX.Element {
 
       <label>
         Fallback Model
-        <input
-          type="text"
-          value={fallbackModel}
-          onChange={(event) => setFallbackModel(event.target.value)}
-          placeholder="Model used when primary fails"
-        />
+        {fallbackDetectedModels.length > 0 ? (
+          <select value={fallbackModel} onChange={(event) => setFallbackModel(event.target.value)}>
+            {fallbackDetectedModels.map((modelName) => (
+              <option key={modelName} value={modelName}>
+                {modelName}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            type="text"
+            value={fallbackModel}
+            onChange={(event) => setFallbackModel(event.target.value)}
+            placeholder="Model used when primary fails"
+          />
+        )}
       </label>
+
+      <button
+        type="button"
+        onClick={handleDetectFallbackModels}
+        disabled={isDetectingFallbackModels || fallbackProvider === "none"}
+      >
+        {isDetectingFallbackModels ? "Detecting Fallback..." : "Auto Detect Fallback Models"}
+      </button>
 
       <label>
         Temperature ({temperature.toFixed(1)})

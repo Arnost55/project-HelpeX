@@ -51,6 +51,7 @@ export default function ChatPanel(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [activeStreamId, setActiveStreamId] = useState<string | null>(null);
   const [activeStreamProvider, setActiveStreamProvider] = useState<string | null>(null);
+  const [activeFallbackUsed, setActiveFallbackUsed] = useState(false);
 
   const activeConversation = useMemo(() => {
     if (activeConversationId) {
@@ -125,6 +126,7 @@ export default function ChatPanel(): JSX.Element {
       const streamId = createId("stream");
       setActiveStreamId(streamId);
       setActiveStreamProvider(null);
+      setActiveFallbackUsed(false);
 
       const refreshedConvo = useChatStore
         .getState()
@@ -208,6 +210,7 @@ export default function ChatPanel(): JSX.Element {
           const providerLabel = event.payload.fallbackUsed
             ? `${event.payload.provider} (fallback)`
             : event.payload.provider;
+          setActiveFallbackUsed(event.payload.fallbackUsed);
           setActiveStreamProvider(`${providerLabel} • ${event.payload.model}`);
         });
 
@@ -275,6 +278,7 @@ export default function ChatPanel(): JSX.Element {
     } finally {
       setActiveStreamId(null);
       setActiveStreamProvider(null);
+      setActiveFallbackUsed(false);
       stopStreaming();
     }
   }
@@ -297,6 +301,7 @@ export default function ChatPanel(): JSX.Element {
             Provider: {provider} | Model: {model} | Messages: {activeConversation?.messages.length ?? 0} | Est. tokens: {conversationTokenEstimate}
           </p>
           {activeStreamProvider ? <p>Streaming via {activeStreamProvider}</p> : null}
+          {activeFallbackUsed ? <p>Primary provider failed, switched to fallback.</p> : null}
         </div>
         {isStreaming ? (
           <button type="button" className="stop-button" onClick={handleStop}>

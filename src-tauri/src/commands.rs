@@ -298,7 +298,11 @@ async fn create_provider_response(
     request: &ChatStreamRequest,
     provider_config: &ProviderConfig,
 ) -> Result<reqwest::Response, AppError> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|error| AppError::Network(error.to_string()))?;
 
     match provider_config.provider.as_str() {
         "openai" => {
@@ -369,6 +373,32 @@ async fn create_provider_response(
             "Unsupported provider: {}",
             provider_config.provider
         ))),
+    }
+}
+
+fn extract_provider_error(provider: &str, payload: &str) -> Option<String> {
+    let json = serde_json::from_str::<Value>(payload).ok()?;
+
+    match provider {
+        "openai" => json
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        "claude" => {
+            let event_type = json.get("type").and_then(Value::as_str).unwrap_or_default();
+            if event_type == "error" {
+                return json
+                    .get("error")
+                    .and_then(|error| error.get("message"))
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string);
+            }
+
+            None
+        }
+        "ollama" => json.get("error").and_then(Value::as_str).map(ToString::to_string),
+        _ => None,
     }
 }
 
@@ -463,6 +493,12 @@ async fn stream_from_provider(
 
                             if is_done_payload(&provider_config.provider, payload) {
                                 return Ok(());
+                            }
+
+                            if let Some(provider_error) =
+                                extract_provider_error(&provider_config.provider, payload)
+                            {
+                                return Err(AppError::Network(provider_error));
                             }
 
                             if let Some(token) = extract_provider_token(&provider_config.provider, payload) {

@@ -13,6 +13,9 @@ pub enum AppError {
 
     #[error("invalid input: {0}")]
     InvalidInput(String),
+
+    #[error("serialization error: {0}")]
+    Serialization(String),
 }
 
 impl From<rusqlite::Error> for AppError {
@@ -30,5 +33,11 @@ impl From<reqwest::Error> for AppError {
 impl From<std::io::Error> for AppError {
     fn from(value: std::io::Error) -> Self {
         Self::Io(value.to_string())
+    }
+}
+
+impl From<serde_json::Error> for AppError {
+    fn from(value: serde_json::Error) -> Self {
+        Self::Serialization(value.to_string())
     }
 }

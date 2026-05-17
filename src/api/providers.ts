@@ -8,7 +8,7 @@ export interface ProviderHealth {
 }
 
 interface ProviderRequest {
-  provider: "openai" | "claude" | "ollama";
+  provider: "openai" | "claude" | "ollama" | "groq" | "together";
   apiKey?: string;
   baseUrl?: string;
 }

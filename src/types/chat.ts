@@ -14,4 +14,5 @@ export interface Conversation {
   createdAt: string;
   updatedAt: string;
   messages: Message[];
+  isIncognito?: boolean;
 }

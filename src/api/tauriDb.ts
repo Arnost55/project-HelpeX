@@ -37,7 +37,7 @@ export async function listConversations(): Promise<
 export async function listMessages(
   conversationId: string
 ): Promise<Array<{ id: string; conversation_id: string; role: "user" | "assistant"; content: string; created_at: string }>> {
-  return invoke("list_messages", { conversationId, conversation_id: conversationId });
+  return invoke("list_messages", { conversation_id: conversationId });
 }
 
 export function mapConversationFromDb(input: {

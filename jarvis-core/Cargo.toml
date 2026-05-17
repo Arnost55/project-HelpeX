@@ -1,0 +1,19 @@
+[package]
+name = "jarvis-core"
+version = "0.1.0"
+description = "JARVIS-AI core logic, state management, and async protocol handling"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+chrono = { version = "0.4", features = ["serde"] }
+rusqlite = { version = "0.31", features = ["bundled", "chrono"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["sync", "macros", "rt", "process", "time", "io-util", "io-std", "fs"] }
+async-trait = "0.1"

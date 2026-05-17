@@ -87,60 +87,21 @@ pub struct ProviderHealthResponse {
     pub latency_ms: u128,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TerminalExecuteRequest {
-    pub command: String,
-    pub working_dir: Option<String>,
-    pub timeout_ms: Option<u64>,
+pub struct ToastEvent {
+    pub id: String,
+    pub title: String,
+    pub message: String,
+    pub kind: ToastKind,
+    pub duration_ms: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TerminalExecuteResponse {
-    pub exit_code: i32,
-    pub stdout: String,
-    pub stderr: String,
-    pub duration_ms: u128,
-    pub timed_out: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FileEntry {
-    pub name: String,
-    pub path: String,
-    pub is_dir: bool,
-    pub size: u64,
-    pub modified_at: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FileReadRequest {
-    pub path: String,
-    pub max_bytes: Option<u64>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FileReadResponse {
-    pub content: String,
-    pub truncated: bool,
-    pub bytes_read: u64,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FileWriteRequest {
-    pub path: String,
-    pub content: String,
-    pub append: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FileDeleteRequest {
-    pub path: String,
-    pub recursive: bool,
+pub enum ToastKind {
+    Info,
+    Success,
+    Warning,
+    Error,
 }

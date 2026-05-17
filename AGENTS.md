@@ -63,3 +63,54 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+## Build System
+
+### Modular Build (preserves .dll files)
+
+Use the custom build script instead of `npm run tauri build` when you need the
+`.exe` and `.dll` files to coexist in a flat output directory:
+
+```bash
+python build-modular.py --release
+```
+
+This compiles all workspace crates (`jarvis-core`, `src-tauri`) and
+assembles the output into `dist-modular/`:
+
+```
+dist-modular/
+├── jarvis_ai.exe          # Tauri application binary
+├── jarvis_core.dll         # jarvis-core (cdylib)
+├── jarvis_ai_lib.dll       # src-tauri lib (cdylib)
+├── index.html              # Frontend assets
+└── assets/                 # Vite build output
+```
+
+### Traditional installer
+
+If you need a WiX/NSIS installer (monolithic, no external .dlls):
+
+```bash
+npm run tauri build
+```
+
+### How `bundle.active` works
+
+`tauri.conf.json` has `"bundle": { "active": false }`. This disables Tauri's
+bundler (`tauri build` skips the installer step when active is false). The
+`build-modular.py` script uses plain `cargo build --workspace` instead, which
+keeps all crate outputs in `target/release/` together.
+
+Set `"active": true` if you want to generate installers again.
+
+### Why cdylib?
+
+`jarvis-core` specifies `crate-type = ["cdylib", "rlib"]`.
+The `cdylib` target produces a `*.dll` that can be loaded via FFI or inspected
+independently. The `rlib` target satisfies normal Rust dependency linking.
+
+This dual-output setup means the .dll files are available for:
+- Dynamic loading (plugin system via `libloading`)
+- External scripts that want to call into the core logic
+- Debugging / profiling the core libraries in isolation

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    ".opencode/system-prompt.md"
+  ],
+  "plugin": [
+    "@different-ai/opencode-browser@latest",
+    "opencode-skills"
+  ]
+}

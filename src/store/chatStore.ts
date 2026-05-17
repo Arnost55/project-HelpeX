@@ -7,6 +7,7 @@ interface ChatState {
   conversations: Conversation[];
   activeConversationId: string | null;
   isStreaming: boolean;
+  cleaningUp: boolean;
   draft: string;
   createConversation: () => void;
   setActiveConversation: (id: string) => void;
@@ -16,6 +17,8 @@ interface ChatState {
   appendAssistantToken: (conversationId: string, token: string) => void;
   startStreaming: () => void;
   stopStreaming: () => void;
+  wipeChat: () => void;
+  removeIncognitoConversations: () => void;
 }
 
 function now(): string {
@@ -29,7 +32,8 @@ function createNewConversation(): Conversation {
     title: "New conversation",
     createdAt: timestamp,
     updatedAt: timestamp,
-    messages: []
+    messages: [],
+    isIncognito: false
   };
 }
 
@@ -39,6 +43,7 @@ export const useChatStore = create<ChatState>()(
       conversations: [createNewConversation()],
       activeConversationId: null,
       isStreaming: false,
+      cleaningUp: false,
       draft: "",
       createConversation: () => {
         const conversation = createNewConversation();
@@ -131,7 +136,30 @@ export const useChatStore = create<ChatState>()(
         }));
       },
       startStreaming: () => set({ isStreaming: true }),
-      stopStreaming: () => set({ isStreaming: false })
+      stopStreaming: () => set({ isStreaming: false }),
+      wipeChat: () => {
+        set({ cleaningUp: true });
+        set({
+          conversations: [createNewConversation()],
+          activeConversationId: null,
+          draft: "",
+          isStreaming: false,
+          cleaningUp: false
+        });
+      },
+      removeIncognitoConversations: () => {
+        set({ cleaningUp: true });
+        set((state) => {
+          const remaining = state.conversations.filter((conversation) => !conversation.isIncognito);
+          return {
+            conversations: remaining.length > 0 ? remaining : [createNewConversation()],
+            activeConversationId: remaining[0]?.id ?? null,
+            draft: "",
+            isStreaming: false,
+            cleaningUp: false
+          };
+        });
+      }
     }),
     {
       name: "jarvis-chat-v1",

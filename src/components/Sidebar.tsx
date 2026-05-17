@@ -20,10 +20,12 @@ export default function Sidebar(props: {
   }, [conversations]);
 
   return (
-    <aside className="sidebar">
-      <div className="sidebar-top">
+    <>
+      <div className="flex items-center justify-between px-4 py-3 border-b shrink-0" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
         <div className="flex items-center gap-2">
-          <h1>JARVIS</h1>
+          <h1 className="m-0 text-sm font-bold uppercase tracking-[0.18em]" style={{ color: 'var(--text-primary)' }}>
+            JARVIS
+          </h1>
           <button
             type="button"
             onClick={props.onToggleSettings}
@@ -31,19 +33,20 @@ export default function Sidebar(props: {
             style={{ color: 'var(--accent-glow)' }}
             title="Settings"
           >
-            <Settings
-              size={18}
-              className="transition-all duration-200"
-              style={{ cursor: 'pointer' }}
-            />
+            <Settings size={16} />
           </button>
         </div>
-        <button type="button" onClick={createConversation}>
+        <button
+          type="button"
+          onClick={createConversation}
+          className="border-0 rounded px-2.5 py-1.5 text-xs font-semibold cursor-pointer transition-colors"
+          style={{ backgroundColor: 'var(--accent-glow)', color: '#fff' }}
+        >
           + New Chat
         </button>
       </div>
 
-      <div className="sidebar-tabs">
+      <div className="flex gap-2 px-4 pt-3 pb-1 shrink-0">
         <button
           type="button"
           className={props.activeTab === "chat" ? "tab-button active" : "tab-button"}
@@ -53,7 +56,7 @@ export default function Sidebar(props: {
         </button>
       </div>
 
-      <ul className="conversation-list">
+      <ul className="flex-1 overflow-y-auto list-none m-0 p-2 flex flex-col gap-1.5">
         {sortedConversations.map((conversation) => {
           const active = conversation.id === activeConversationId;
 
@@ -73,6 +76,6 @@ export default function Sidebar(props: {
           );
         })}
       </ul>
-    </aside>
+    </>
   );
 }

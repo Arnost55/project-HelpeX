@@ -1,3 +1,13 @@
+html, body, #root {
+  background-color: #0b0014 !important;
+  color: #00ffff !important;
+  height: 100vh;
+  width: 100vw;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
 :root, html[data-theme="default-dark"] {
   --bg-main: #0b0014;
   --bg-panel: #160029;
@@ -57,73 +67,7 @@ html[data-theme="community-blue-neon"] {
 }
 
 body {
-  margin: 0;
-  padding: 0;
-  min-height: 100vh;
-  background-color: var(--bg-main) !important;
-  color: var(--text-primary) !important;
   font-family: system-ui, -apple-system, sans-serif;
-}
-
-#root {
-  min-height: 100vh;
-}
-
-.app-shell {
-  display: grid;
-  grid-template-columns: 260px 1fr;
-  gap: 16px;
-  padding: 16px;
-  min-height: 100vh;
-}
-
-.sidebar,
-.chat-panel {
-  background: var(--surface);
-  border: 1px solid var(--panel-border);
-  border-radius: 16px;
-  box-shadow: var(--shadow);
-  color: var(--ink);
-}
-
-.sidebar {
-  display: flex;
-  flex-direction: column;
-}
-
-.sidebar-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px;
-  border-bottom: 1px solid var(--panel-border);
-}
-
-.sidebar-top h1 {
-  margin: 0;
-  font-size: 1rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--ink-strong);
-}
-
-.sidebar-top button {
-  border: 0;
-  background: var(--accent);
-  color: #fff;
-  border-radius: 8px;
-  padding: 8px 10px;
-  cursor: pointer;
-}
-
-.sidebar-top button:hover {
-  background: var(--accent-strong);
-}
-
-.sidebar-tabs {
-  display: flex;
-  gap: 8px;
-  padding: 12px 16px 0;
 }
 
 .tab-button {

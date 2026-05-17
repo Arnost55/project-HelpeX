@@ -77,22 +77,30 @@ export default function App(): JSX.Element {
   }, [setTheme]);
 
   return (
-    <div className="app-shell">
-      <Sidebar
-        activeTab={activeTab}
-        onSelectTab={setActiveTab}
-        isSettingsModalOpen={isSettingsModalOpen}
-        onToggleSettings={() => setIsSettingsModalOpen((prev) => !prev)}
-      />
-      <ChatPanel onNavigate={(tab) => setActiveTab(tab)} />
-      <SettingsModal
-        isOpen={isSettingsModalOpen}
-        onClose={() => setIsSettingsModalOpen(false)}
-        activeTab={settingsTab}
-        onTabChange={(tab: string) => setSettingsTab(tab as "ai" | "integration" | "appearance" | "system")}
-      >
-        <SettingsPanel activeTab={settingsTab} onTabChange={setSettingsTab} onThemeChange={handleThemeChange} />
-      </SettingsModal>
+    <div className="flex h-screen w-screen overflow-hidden" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)' }}>
+      <aside className="w-64 h-full flex flex-col border-r shrink-0" style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'rgba(255,255,255,0.05)' }}>
+        <Sidebar
+          activeTab={activeTab}
+          onSelectTab={setActiveTab}
+          isSettingsModalOpen={isSettingsModalOpen}
+          onToggleSettings={() => setIsSettingsModalOpen((prev) => !prev)}
+        />
+      </aside>
+
+      <main className="flex-1 h-full flex flex-col min-w-0" style={{ backgroundColor: 'var(--bg-main)' }}>
+        <ChatPanel onNavigate={(tab) => setActiveTab(tab)} />
+      </main>
+
+      {isSettingsModalOpen && (
+        <SettingsModal
+          isOpen={isSettingsModalOpen}
+          onClose={() => setIsSettingsModalOpen(false)}
+          activeTab={settingsTab}
+          onTabChange={(tab: string) => setSettingsTab(tab as "ai" | "integration" | "appearance" | "system")}
+        >
+          <SettingsPanel activeTab={settingsTab} onTabChange={setSettingsTab} onThemeChange={handleThemeChange} />
+        </SettingsModal>
+      )}
     </div>
   );
 }

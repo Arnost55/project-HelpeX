@@ -24,7 +24,7 @@ export default function MessageInput(props: {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="border-t border-[#30363D] px-5 py-4 bg-[#0D1117]/50">
+    <form onSubmit={handleSubmit} className="message-input">
       <div className="flex items-end gap-3">
         <div className="flex-1 relative">
           <textarea
@@ -33,13 +33,38 @@ export default function MessageInput(props: {
             placeholder="Ask JARVIS anything..."
             rows={2}
             disabled={props.disabled || isSubmitting}
-            className="w-full bg-[#21262D] border border-[#30363D] rounded-xl px-4 py-3 pr-12 text-sm text-[#F0F6FC] placeholder-[#8B949E] resize-none outline-none transition-all duration-200 focus:border-cyan-500 focus:shadow-[0_0_12px_rgba(0,245,255,0.15)] disabled:opacity-50 font-sans"
+            className="w-full rounded-xl px-4 py-3 pr-12 text-xs resize-none outline-none motion-safe:transition-[border-color,box-shadow] duration-150 ease-out disabled:opacity-40"
+            style={{
+              backgroundColor: "var(--bg-field)",
+              border: "1px solid var(--border-field)",
+              color: "var(--text-primary)",
+            }}
+            onFocus={(e) => {
+              e.currentTarget.style.borderColor = "var(--accent-cyan)";
+              e.currentTarget.style.boxShadow =
+                "0 0 0 2px rgba(0, 229, 255, 0.15)";
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.borderColor = "var(--border-field)";
+              e.currentTarget.style.boxShadow = "none";
+            }}
           />
         </div>
         <button
           type="submit"
           disabled={props.disabled || isSubmitting || text.trim().length === 0}
-          className="cyber-btn cyber-btn-primary px-4 py-3 disabled:opacity-40 disabled:cursor-not-allowed"
+          className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-semibold motion-safe:transition-all duration-150 ease-out disabled:opacity-40 disabled:cursor-not-allowed"
+          style={{
+            backgroundColor: "var(--accent-glow)",
+            color: "#fff",
+          }}
+          onMouseEnter={(e) => {
+            if (!props.disabled && text.trim().length > 0)
+              e.currentTarget.style.filter = "brightness(1.15)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.filter = "none";
+          }}
         >
           {props.disabled || isSubmitting ? (
             <Loader2 size={16} className="animate-spin" />

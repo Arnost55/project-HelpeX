@@ -1,42 +1,38 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useSettingsStore } from "../store/settingsStore";
 import { checkProviderHealth, listProviderModels } from "../api/providers";
 import { getAvailableThemes, type ThemeDefinition } from "../api/settingsApi";
+import { useDebouncedSave } from "../hooks/useDebouncedSave";
+import { CyberInput, CyberSelect, CyberToggle, CyberSlider } from "./ui";
 import {
   Brain, Cpu, Thermometer, Layers, Palette, Monitor, Type, Code, PlugZap,
-  Eye, EyeOff, RefreshCw, CheckCircle2, XCircle, Wifi, Gauge,
-  Settings2, Sliders, Key, Globe, Command, Minimize2, Bell,
+  Eye, EyeOff, RefreshCw, CheckCircle2, Gauge,
+  Sliders, Key, Globe, Command, Minimize2, Bell,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 type Provider = "openai" | "claude" | "ollama" | "groq" | "together";
 type SettingsTab = "ai" | "integration" | "appearance" | "system";
 
-const TABS: { id: SettingsTab; label: string; icon: LucideIcon }[] = [
-  { id: "ai", label: "AI Engine", icon: Brain },
-  { id: "integration", label: "Integration", icon: PlugZap },
-  { id: "appearance", label: "Appearance", icon: Palette },
-  { id: "system", label: "System", icon: Monitor },
-];
-
-const KNOWN_THUMB_CLASSES: Record<string, string> = {
-  default: "theme-thumb-default",
-  "community-blue-neon": "theme-thumb-blue-neon",
-};
-
-function thumbClass(id: string): string {
-  return KNOWN_THUMB_CLASSES[id] ?? "";
-}
-
 function SectionHeader({ icon: Icon, title }: { icon: LucideIcon; title: string }) {
   return (
     <div className="flex items-center gap-3 mb-5">
-      <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center">
-        <Icon size={16} className="text-cyan-400" />
+      <div
+        className="w-8 h-8 rounded-lg flex items-center justify-center"
+        style={{
+          backgroundColor: "rgba(0, 229, 255, 0.08)",
+          border: "1px solid rgba(0, 229, 255, 0.15)",
+        }}
+      >
+        <Icon size={16} style={{ color: "var(--accent-cyan)" }} />
       </div>
       <div>
-        <h3 className="text-[#F0F6FC] font-semibold text-sm">{title}</h3>
-        <p className="text-[#8B949E] text-xs">Control Center</p>
+        <h3 className="font-semibold text-sm" style={{ color: "var(--text-primary)" }}>
+          {title}
+        </h3>
+        <p className="text-micro" style={{ color: "var(--text-muted)" }}>
+          Control Center
+        </p>
       </div>
     </div>
   );
@@ -45,13 +41,28 @@ function SectionHeader({ icon: Icon, title }: { icon: LucideIcon; title: string 
 function SectionDivider({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-3 mb-4">
-      <span className="text-[#8B949E] text-xs font-semibold uppercase tracking-[0.1em]">{label}</span>
-      <div className="flex-1 h-px bg-gradient-to-r from-[#30363D] to-transparent" />
+      <span
+        className="text-micro font-semibold uppercase tracking-[0.1em]"
+        style={{ color: "var(--text-muted)" }}
+      >
+        {label}
+      </span>
+      <div
+        className="flex-1 h-px"
+        style={{
+          background:
+            "linear-gradient(to right, var(--border-panel), transparent)",
+        }}
+      />
     </div>
   );
 }
 
-export default function SettingsPanel(props: { activeTab: SettingsTab; onTabChange: (tab: SettingsTab) => void; onThemeChange?: (theme: ThemeDefinition) => void }): JSX.Element {
+export default function SettingsPanel(props: {
+  activeTab: SettingsTab;
+  onTabChange: (tab: SettingsTab) => void;
+  onThemeChange?: (theme: ThemeDefinition) => void;
+}): JSX.Element {
   const provider = useSettingsStore((s) => s.provider);
   const model = useSettingsStore((s) => s.model);
   const temperature = useSettingsStore((s) => s.temperature);
@@ -83,12 +94,33 @@ export default function SettingsPanel(props: { activeTab: SettingsTab; onTabChan
 
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
-  const [healthStatus, setHealthStatus] = useState<{ healthy: boolean; message: string; latencyMs: number } | null>(null);
+  const [healthStatus, setHealthStatus] = useState<{
+    healthy: boolean;
+    message: string;
+    latencyMs: number;
+  } | null>(null);
   const [checkingHealth, setCheckingHealth] = useState(false);
   const [apiKeyVisibility, setApiKeyVisibility] = useState<Record<string, boolean>>({});
-  const [interfaceFont, setInterfaceFont] = useState("Inter");
-  const [codeFont, setCodeFont] = useState("JetBrains Mono");
+  const [interfaceFont, setInterfaceFont] = useState("Manrope");
+  const [codeFont, setCodeFont] = useState("Fira Code");
   const [availableThemes, setAvailableThemes] = useState<ThemeDefinition[]>([]);
+
+  const { schedule } = useDebouncedSave(600);
+  const prevValues = useRef({ provider, model, theme, temperature, maxTokens });
+
+  useEffect(() => {
+    const p = prevValues.current;
+    if (
+      p.provider !== provider ||
+      p.model !== model ||
+      p.theme !== theme ||
+      p.temperature !== temperature ||
+      p.maxTokens !== maxTokens
+    ) {
+      schedule({ provider, model, activeTheme: theme, temperature, maxTokens });
+      prevValues.current = { provider, model, theme, temperature, maxTokens };
+    }
+  }, [provider, model, theme, temperature, maxTokens, schedule]);
 
   useEffect(() => {
     handleHealthCheck();
@@ -116,7 +148,11 @@ export default function SettingsPanel(props: { activeTab: SettingsTab; onTabChan
         latencyMs: result.latencyMs,
       });
     } catch {
-      setHealthStatus({ healthy: false, message: "Connection failed", latencyMs: 0 });
+      setHealthStatus({
+        healthy: false,
+        message: "Connection failed",
+        latencyMs: 0,
+      });
     } finally {
       setCheckingHealth(false);
     }
@@ -165,15 +201,12 @@ export default function SettingsPanel(props: { activeTab: SettingsTab; onTabChan
 
   function maskKey(key: string): string {
     if (!key) return "Not configured";
-    if (key.length < 8) return "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
-    return key.slice(0, 4) + "\u2022\u2022\u2022\u2022" + key.slice(-4);
+    if (key.length < 8) return "••••••••";
+    return key.slice(0, 4) + "••••" + key.slice(-4);
   }
 
   function toggleKeyVisibility(keyId: string) {
-    setApiKeyVisibility((prev) => ({
-      ...prev,
-      [keyId]: !prev[keyId],
-    }));
+    setApiKeyVisibility((prev) => ({ ...prev, [keyId]: !prev[keyId] }));
   }
 
   const apiKeyFields = [
@@ -190,294 +223,505 @@ export default function SettingsPanel(props: { activeTab: SettingsTab; onTabChan
   ];
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Tab Navigation */}
-      <div className="flex border-b border-[#30363D] bg-[#0D1117]/50">
-        {TABS.map((tab) => {
-          const Icon = tab.icon;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => props.onTabChange(tab.id)}
-              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-[10px] font-medium transition-all duration-200 border-b-2 ${
-                props.activeTab === tab.id
-                  ? "border-cyan-400 text-cyan-400 bg-cyan-500/5"
-                  : "border-transparent text-[#8B949E] hover:text-[#F0F6FC] hover:bg-[#21262D]"
-              }`}
-            >
-              <Icon size={12} />
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
+    <>
+      {props.activeTab === "ai" && (
+        <>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>
+                AI Engine
+              </h2>
+              <p className="text-micro" style={{ color: "var(--text-muted)" }}>
+                Configure provider, model, and generation
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span
+                className={`status-dot ${
+                  healthStatus?.healthy
+                    ? "healthy"
+                    : healthStatus === null
+                      ? "idle"
+                      : "disconnected"
+                }`}
+              />
+              <span className="token-readout">
+                {healthStatus?.healthy
+                  ? `Connected (${healthStatus.latencyMs}ms)`
+                  : healthStatus
+                    ? "Disconnected"
+                    : "Idle"}
+              </span>
+            </div>
+          </div>
 
-      {/* Tab Content */}
-      <div className="settings-modal-content flex-1 overflow-y-auto px-5 py-6 space-y-5">
-        {props.activeTab === "ai" && (
-          <>
-            <div className="flex items-center justify-between mb-2">
-              <div>
-                <h2 className="text-lg font-bold text-[#F0F6FC] tracking-tight">AI Engine</h2>
-                <p className="text-xs text-[#8B949E] mt-0.5">Configure provider, model, and generation</p>
+          <div className="cyber-card">
+            <SectionHeader icon={Brain} title="AI Configuration" />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label
+                  className="text-micro font-medium flex items-center gap-1.5"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  <Cpu size={12} />
+                  Primary Provider
+                </label>
+                <CyberSelect
+                  value={provider}
+                  onChange={(e) => handleProviderChange(e.target.value)}
+                >
+                  <option value="openai">OpenAI</option>
+                  <option value="claude">Claude</option>
+                  <option value="ollama">Ollama</option>
+                  <option value="groq">Groq</option>
+                  <option value="together">Together</option>
+                </CyberSelect>
               </div>
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${healthStatus?.healthy ? 'bg-green-500' : healthStatus === null ? 'bg-[#30363D]' : 'bg-red-500'}`} />
-                <span className="text-xs text-[#8B949E]">
-                  {healthStatus?.healthy ? `Connected (${healthStatus.latencyMs}ms)` : healthStatus ? 'Disconnected' : 'Idle'}
-                </span>
+              <div className="space-y-1.5">
+                <label
+                  className="text-micro font-medium flex items-center gap-1.5"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  <Layers size={12} />
+                  Model
+                </label>
+                <div className="relative">
+                  <CyberInput
+                    placeholder="e.g. gpt-4o-mini"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    className="pr-8"
+                  />
+                  <button
+                    onClick={handleFetchModels}
+                    disabled={loadingModels}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 motion-safe:transition-colors duration-150 ease-out"
+                    style={{ color: "var(--text-muted)" }}
+                    onMouseEnter={(e) =>
+                      (e.currentTarget.style.color = "var(--accent-cyan)")
+                    }
+                    onMouseLeave={(e) =>
+                      (e.currentTarget.style.color = "var(--text-muted)")
+                    }
+                    title="Fetch models"
+                  >
+                    <RefreshCw
+                      size={14}
+                      className={loadingModels ? "animate-spin" : ""}
+                    />
+                  </button>
+                </div>
+                {availableModels.length > 0 && (
+                  <div className="mt-2 max-h-32 overflow-y-auto space-y-1">
+                    {availableModels.map((m) => (
+                      <button
+                        key={m}
+                        className={`w-full text-left px-3 py-1.5 rounded text-micro font-mono motion-safe:transition-colors duration-150 ease-out ${
+                          m === model
+                            ? "bg-[rgba(0,229,255,0.08)] border border-[rgba(0,229,255,0.2)]"
+                            : "hover:bg-[rgba(255,255,255,0.02)] border border-transparent"
+                        }`}
+                        style={{
+                          color:
+                            m === model
+                              ? "var(--accent-cyan)"
+                              : "var(--text-muted)",
+                        }}
+                        onClick={() => setModel(m)}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="space-y-2">
+                <label
+                  className="text-micro font-medium flex items-center gap-1.5"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  <Thermometer size={12} />
+                  Temperature
+                </label>
+                <CyberSlider
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  value={temperature}
+                  onChange={(e) => setTemperature(Number(e.target.value))}
+                  valueLabel={temperature.toFixed(1)}
+                />
+              </div>
+              <div className="space-y-2">
+                <label
+                  className="text-micro font-medium flex items-center gap-1.5"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  <Sliders size={12} />
+                  Max Tokens
+                </label>
+                <CyberSlider
+                  min={64}
+                  max={8192}
+                  step={64}
+                  value={maxTokens}
+                  onChange={(e) => setMaxTokens(Number(e.target.value))}
+                  valueLabel={
+                    maxTokens >= 1000
+                      ? `${(maxTokens / 1000).toFixed(1)}k`
+                      : String(maxTokens)
+                  }
+                />
               </div>
             </div>
 
-            <div className="cyber-card p-5">
-              <SectionHeader icon={Brain} title="AI Configuration" />
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs text-[#8B949E] font-medium flex items-center gap-1.5">
-                    <Cpu size={12} />
-                    Primary Provider
-                  </label>
-                  <select className="cyber-select w-full" value={provider} onChange={(e) => handleProviderChange(e.target.value)}>
-                    <option value="openai">OpenAI</option>
-                    <option value="claude">Claude</option>
-                    <option value="ollama">Ollama</option>
-                    <option value="groq">Groq</option>
-                    <option value="together">Together</option>
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs text-[#8B949E] font-medium flex items-center gap-1.5">
-                    <Layers size={12} />
-                    Model
-                  </label>
-                  <div className="relative">
-                    <input className="cyber-input w-full pr-8" placeholder="e.g. gpt-4o-mini" value={model} onChange={(e) => setModel(e.target.value)} />
-                    <button onClick={handleFetchModels} disabled={loadingModels} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#8B949E] hover:text-cyan-400 transition-colors" title="Fetch models">
-                      <RefreshCw size={14} className={loadingModels ? "animate-spin" : ""} />
-                    </button>
-                  </div>
-                  {availableModels.length > 0 && (
-                    <div className="mt-2 max-h-32 overflow-y-auto space-y-1">
-                      {availableModels.map((m) => (
-                        <button key={m} className={`w-full text-left px-3 py-1.5 rounded text-xs font-mono transition-colors ${m === model ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20" : "text-[#8B949E] hover:bg-[#21262D] border border-transparent"}`} onClick={() => setModel(m)}>
-                          {m}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs text-[#8B949E] font-medium flex items-center gap-1.5">
-                    <Thermometer size={12} />
-                    Temperature
-                  </label>
-                  <div className="flex items-center gap-3">
-                    <input type="range" min={0} max={2} step={0.1} className="cyber-slider flex-1" value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} />
-                    <span className="text-xs font-mono text-cyan-400 w-8 text-right tabular-nums">{temperature.toFixed(1)}</span>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs text-[#8B949E] font-medium flex items-center gap-1.5">
-                    <Sliders size={12} />
-                    Max Tokens
-                  </label>
-                  <div className="flex items-center gap-3">
-                    <input type="range" min={64} max={8192} step={64} className="cyber-slider flex-1" value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value))} />
-                    <span className="text-xs font-mono text-cyan-400 w-14 text-right tabular-nums">{maxTokens >= 1000 ? `${(maxTokens / 1000).toFixed(1)}k` : maxTokens}</span>
-                  </div>
-                </div>
+            <SectionDivider label="Fallback" />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label
+                  className="text-micro font-medium"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  Fallback Provider
+                </label>
+                <CyberSelect
+                  value={fallbackProvider}
+                  onChange={(e) => setFallbackProvider(e.target.value as "none" | Provider)}
+                >
+                  <option value="none">None</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="claude">Claude</option>
+                  <option value="ollama">Ollama</option>
+                  <option value="groq">Groq</option>
+                  <option value="together">Together</option>
+                </CyberSelect>
               </div>
-              <SectionDivider label="Fallback" />
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs text-[#8B949E] font-medium">Fallback Provider</label>
-                  <select className="cyber-select w-full" value={fallbackProvider} onChange={(e) => setFallbackProvider(e.target.value as "none" | Provider)}>
-                    <option value="none">None</option>
-                    <option value="openai">OpenAI</option>
-                    <option value="claude">Claude</option>
-                    <option value="ollama">Ollama</option>
-                    <option value="groq">Groq</option>
-                    <option value="together">Together</option>
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs text-[#8B949E] font-medium">Fallback Model</label>
-                  <input className="cyber-input w-full" placeholder="e.g. gpt-4o-mini" value={fallbackModel} onChange={(e) => setFallbackModel(e.target.value)} />
-                </div>
+              <div className="space-y-1.5">
+                <label
+                  className="text-micro font-medium"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  Fallback Model
+                </label>
+                <CyberInput
+                  placeholder="e.g. gpt-4o-mini"
+                  value={fallbackModel}
+                  onChange={(e) => setFallbackModel(e.target.value)}
+                />
               </div>
-              <div className="mt-4 pt-4 border-t border-[#30363D] flex items-center justify-between">
-                <button onClick={handleHealthCheck} disabled={checkingHealth} className="cyber-btn cyber-btn-ghost text-xs">
+            </div>
+
+            <div
+              className="mt-4 pt-4"
+              style={{ borderTop: "1px solid var(--border-panel)" }}
+            >
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={handleHealthCheck}
+                  disabled={checkingHealth}
+                  className="cyber-btn"
+                >
                   <Gauge size={14} />
                   {checkingHealth ? "Checking..." : "Test Connection"}
                 </button>
                 {healthStatus && (
                   <div className="flex items-center gap-2 text-xs">
-                    {healthStatus.healthy ? <CheckCircle2 size={14} className="text-green-500" /> : <XCircle size={14} className="text-red-500" />}
-                    <span className={healthStatus.healthy ? "text-green-500" : "text-red-500"}>{healthStatus.message}</span>
+                    <span
+                      className={`status-dot ${
+                        healthStatus.healthy ? "healthy" : "disconnected"
+                      }`}
+                    />
+                    <span
+                      style={{
+                        color: healthStatus.healthy
+                          ? "var(--accent-cyan)"
+                          : "var(--danger)",
+                      }}
+                      className="text-micro"
+                    >
+                      {healthStatus.message}
+                    </span>
                   </div>
                 )}
               </div>
             </div>
-          </>
-        )}
+          </div>
+        </>
+      )}
 
-        {props.activeTab === "integration" && (
-          <>
-            <div className="mb-2">
-              <h2 className="text-lg font-bold text-[#F0F6FC] tracking-tight">Integration</h2>
-              <p className="text-xs text-[#8B949E] mt-0.5">API keys and connection URLs</p>
-            </div>
+      {props.activeTab === "integration" && (
+        <>
+          <div className="mb-4">
+            <h2 className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>
+              Integration
+            </h2>
+            <p className="text-micro" style={{ color: "var(--text-muted)" }}>
+              API keys and connection URLs
+            </p>
+          </div>
 
-            <div className="cyber-card p-5">
-              <SectionHeader icon={Key} title="API Keys" />
-              <div className="space-y-2">
-                {apiKeyFields.map((field) => (
-                  <div key={field.id} className="flex items-center gap-3">
-                    <div className="flex-1 space-y-1">
-                      <label className="text-[10px] text-[#8B949E] font-medium uppercase tracking-wider">{field.label}</label>
-                      <div className="relative">
-                        <input type={apiKeyVisibility[field.id] ? "text" : "password"} className="cyber-input w-full font-mono text-xs pr-10" value={field.value} onChange={(e) => field.setter(e.target.value)} placeholder="sk-..." />
-                        <button onClick={() => toggleKeyVisibility(field.id)} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#8B949E] hover:text-cyan-400 transition-colors">
-                          {apiKeyVisibility[field.id] ? <EyeOff size={14} /> : <Eye size={14} />}
-                        </button>
-                      </div>
-                    </div>
-                    <div className="flex-shrink-0 pt-5">
-                      <div className="w-20 h-8 rounded bg-[#21262D] border border-[#30363D] flex items-center justify-center">
-                        <span className="text-[10px] font-mono text-[#8B949E]">{field.value ? maskKey(field.value) : "\u2014"}</span>
-                      </div>
+          <div className="cyber-card">
+            <SectionHeader icon={Key} title="API Keys" />
+            <div className="space-y-3">
+              {apiKeyFields.map((field) => (
+                <div key={field.id} className="flex items-center gap-3">
+                  <div className="flex-1 space-y-1">
+                    <label
+                      className="text-micro font-medium uppercase tracking-wider"
+                      style={{ color: "var(--text-muted)" }}
+                    >
+                      {field.label}
+                    </label>
+                    <div className="relative">
+                      <CyberInput
+                        type={apiKeyVisibility[field.id] ? "text" : "password"}
+                        value={field.value}
+                        onChange={(e) => field.setter(e.target.value)}
+                        placeholder="sk-..."
+                        className="pr-10 font-mono"
+                      />
+                      <button
+                        onClick={() => toggleKeyVisibility(field.id)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 motion-safe:transition-colors duration-150 ease-out"
+                        style={{ color: "var(--text-muted)" }}
+                        onMouseEnter={(e) =>
+                          (e.currentTarget.style.color = "var(--accent-glow)")
+                        }
+                        onMouseLeave={(e) =>
+                          (e.currentTarget.style.color = "var(--text-muted)")
+                        }
+                      >
+                        {apiKeyVisibility[field.id] ? (
+                          <EyeOff size={14} />
+                        ) : (
+                          <Eye size={14} />
+                        )}
+                      </button>
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="cyber-card p-5">
-              <SectionHeader icon={Globe} title="Base URLs" />
-              <div className="space-y-2">
-                {baseUrlFields.map((field) => (
-                  <div key={field.id} className="space-y-1">
-                    <label className="text-[10px] text-[#8B949E] font-medium uppercase tracking-wider">{field.label}</label>
-                    <input className="cyber-input w-full font-mono text-xs" value={field.value} onChange={(e) => field.setter(e.target.value)} placeholder="http://..." />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </>
-        )}
-
-        {props.activeTab === "appearance" && (
-          <>
-            <div className="mb-2">
-              <h2 className="text-lg font-bold text-[#F0F6FC] tracking-tight">Appearance</h2>
-              <p className="text-xs text-[#8B949E] mt-0.5">Theme, fonts, and visual preferences</p>
-            </div>
-
-            <div className="cyber-card p-5">
-              <SectionHeader icon={Palette} title="Theme" />
-              <div className="grid grid-cols-3 gap-3">
-                {availableThemes.map((t) => (
-                  <button key={t.id} onClick={() => props.onThemeChange ? props.onThemeChange(t) : setTheme(t.id)} className={`theme-thumb ${thumbClass(t.id)} ${theme === t.id ? "active" : ""}`}>
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <span className={`text-[10px] font-semibold tracking-wider ${theme === t.id ? "text-cyan-400" : "text-[#8B949E]"}`}>{t.label}</span>
+                  <div className="flex-shrink-0 pt-5">
+                    <div
+                      className="w-20 h-8 rounded flex items-center justify-center"
+                      style={{
+                        backgroundColor: "var(--bg-field)",
+                        border: "1px solid var(--border-field)",
+                      }}
+                    >
+                      <span
+                        className="text-micro font-mono"
+                        style={{ color: "var(--text-muted)" }}
+                      >
+                        {field.value ? maskKey(field.value) : "\u2014"}
+                      </span>
                     </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="cyber-card">
+            <SectionHeader icon={Globe} title="Base URLs" />
+            <div className="space-y-3">
+              {baseUrlFields.map((field) => (
+                <div key={field.id} className="space-y-1">
+                  <label
+                    className="text-micro font-medium uppercase tracking-wider"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    {field.label}
+                  </label>
+                  <CyberInput
+                    value={field.value}
+                    onChange={(e) => field.setter(e.target.value)}
+                    placeholder="http://..."
+                    className="font-mono"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {props.activeTab === "appearance" && (
+        <>
+          <div className="mb-4">
+            <h2 className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>
+              Appearance
+            </h2>
+            <p className="text-micro" style={{ color: "var(--text-muted)" }}>
+              Theme, fonts, and visual preferences
+            </p>
+          </div>
+
+          <div className="cyber-card">
+            <SectionHeader icon={Palette} title="Theme" />
+            <div className="flex flex-row gap-3 mt-2">
+              {availableThemes.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() =>
+                    props.onThemeChange
+                      ? props.onThemeChange(t)
+                      : setTheme(t.id)
+                  }
+                  className="flex-1 p-3 rounded-md border text-center cursor-pointer motion-safe:transition-all duration-150 ease-out"
+                  style={{
+                    backgroundColor: "rgba(255, 255, 255, 0.03)",
+                    borderColor:
+                      theme === t.id
+                        ? "var(--accent-glow)"
+                        : "var(--border-panel)",
+                  }}
+                >
+                  <div className="flex flex-col items-center gap-1.5">
+                    <span
+                      className="text-xs font-semibold tracking-wider"
+                      style={{
+                        color:
+                          theme === t.id
+                            ? "var(--accent-glow)"
+                            : "var(--text-muted)",
+                      }}
+                    >
+                      {t.label}
+                    </span>
                     {theme === t.id && (
-                      <div className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-cyan-500 flex items-center justify-center">
-                        <CheckCircle2 size={10} className="text-[#0D1117]" />
-                      </div>
+                      <CheckCircle2
+                        size={12}
+                        style={{ color: "var(--accent-glow)" }}
+                      />
                     )}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="cyber-card p-5">
-              <SectionHeader icon={Type} title="Typography" />
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs text-[#8B949E] font-medium flex items-center gap-1.5">
-                    <Type size={12} />
-                    Interface Font
-                  </label>
-                  <select className="cyber-select w-full" value={interfaceFont} onChange={(e) => setInterfaceFont(e.target.value)}>
-                    <option value="Inter">Inter</option>
-                    <option value="Space Grotesk">Space Grotesk</option>
-                    <option value="Manrope">Manrope</option>
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs text-[#8B949E] font-medium flex items-center gap-1.5">
-                    <Code size={12} />
-                    Code Font
-                  </label>
-                  <select className="cyber-select w-full" value={codeFont} onChange={(e) => setCodeFont(e.target.value)}>
-                    <option value="JetBrains Mono">JetBrains Mono</option>
-                    <option value="Fira Code">Fira Code</option>
-                    <option value="Source Code Pro">Source Code Pro</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-
-        {props.activeTab === "system" && (
-          <>
-            <div className="mb-2">
-              <h2 className="text-lg font-bold text-[#F0F6FC] tracking-tight">System</h2>
-              <p className="text-xs text-[#8B949E] mt-0.5">Hotkeys, tray, and application behavior</p>
-            </div>
-
-            <div className="cyber-card p-5">
-              <SectionHeader icon={Command} title="Global Hotkeys" />
-              <div className="space-y-3">
-                <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-[#21262D] border border-[#30363D]">
-                  <div className="flex items-center gap-2">
-                    <Command size={14} className="text-cyan-400" />
-                    <span className="text-xs text-[#F0F6FC]">Toggle Window</span>
                   </div>
-                  <kbd className="text-[10px] font-mono text-[#8B949E] bg-[#0D1117] px-2 py-0.5 rounded border border-[#30363D]">Ctrl+Space</kbd>
-                </div>
-                <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-[#21262D] border border-[#30363D]">
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="cyber-card">
+            <SectionHeader icon={Type} title="Typography" />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label
+                  className="text-micro font-medium flex items-center gap-1.5"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  <Type size={12} />
+                  Interface Font
+                </label>
+                <CyberSelect
+                  value={interfaceFont}
+                  onChange={(e) => setInterfaceFont(e.target.value)}
+                >
+                  <option value="Manrope">Manrope</option>
+                  <option value="Inter">Inter</option>
+                  <option value="Space Grotesk">Space Grotesk</option>
+                </CyberSelect>
+              </div>
+              <div className="space-y-1.5">
+                <label
+                  className="text-micro font-medium flex items-center gap-1.5"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  <Code size={12} />
+                  Code Font
+                </label>
+                <CyberSelect
+                  value={codeFont}
+                  onChange={(e) => setCodeFont(e.target.value)}
+                >
+                  <option value="Fira Code">Fira Code</option>
+                  <option value="JetBrains Mono">JetBrains Mono</option>
+                  <option value="Source Code Pro">Source Code Pro</option>
+                </CyberSelect>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {props.activeTab === "system" && (
+        <>
+          <div className="mb-4">
+            <h2 className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>
+              System
+            </h2>
+            <p className="text-micro" style={{ color: "var(--text-muted)" }}>
+              Hotkeys, tray, and application behavior
+            </p>
+          </div>
+
+          <div className="cyber-card">
+            <SectionHeader icon={Command} title="Global Hotkeys" />
+            <div className="space-y-2">
+              {[
+                { label: "Toggle Window", keys: "Ctrl+Space" },
+                { label: "Command Palette", keys: "Ctrl+K" },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className="flex items-center justify-between py-2 px-3 rounded-lg"
+                  style={{
+                    backgroundColor: "rgba(0,0,0,0.25)",
+                    border: "1px solid var(--border-panel)",
+                  }}
+                >
                   <div className="flex items-center gap-2">
-                    <Command size={14} className="text-cyan-400" />
-                    <span className="text-xs text-[#F0F6FC]">Command Palette</span>
+                    <Command
+                      size={14}
+                      style={{ color: "var(--accent-glow)" }}
+                    />
+                    <span className="text-xs" style={{ color: "var(--text-primary)" }}>
+                      {item.label}
+                    </span>
                   </div>
-                  <kbd className="text-[10px] font-mono text-[#8B949E] bg-[#0D1117] px-2 py-0.5 rounded border border-[#30363D]">Ctrl+K</kbd>
+                  <kbd
+                    className="text-micro font-mono px-2 py-0.5 rounded border"
+                    style={{
+                      backgroundColor: "var(--bg-main)",
+                      borderColor: "var(--border-panel)",
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    {item.keys}
+                  </kbd>
                 </div>
-              </div>
+              ))}
             </div>
+          </div>
 
-            <div className="cyber-card p-5">
-              <SectionHeader icon={Minimize2} title="System Tray" />
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-[#F0F6FC]">Minimize to tray</p>
-                  <p className="text-[10px] text-[#8B949E]">JARVIS runs in the background when closed</p>
-                </div>
-                <label className="cyber-toggle">
-                  <input type="checkbox" defaultChecked />
-                  <div className="cyber-toggle-track"><div className="cyber-toggle-thumb" /></div>
-                </label>
+          <div className="cyber-card">
+            <SectionHeader icon={Minimize2} title="System Tray" />
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs" style={{ color: "var(--text-primary)" }}>
+                  Minimize to tray
+                </p>
+                <p className="text-micro" style={{ color: "var(--text-muted)" }}>
+                  JARVIS runs in the background when closed
+                </p>
               </div>
+              <CyberToggle defaultChecked />
             </div>
+          </div>
 
-            <div className="cyber-card p-5">
-              <SectionHeader icon={Bell} title="Notifications" />
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-[#F0F6FC]">Desktop notifications</p>
-                  <p className="text-[10px] text-[#8B949E]">Show alerts for system events</p>
-                </div>
-                <label className="cyber-toggle">
-                  <input type="checkbox" defaultChecked />
-                  <div className="cyber-toggle-track"><div className="cyber-toggle-thumb" /></div>
-                </label>
+          <div className="cyber-card">
+            <SectionHeader icon={Bell} title="Notifications" />
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs" style={{ color: "var(--text-primary)" }}>
+                  Desktop notifications
+                </p>
+                <p className="text-micro" style={{ color: "var(--text-muted)" }}>
+                  Show alerts for system events
+                </p>
               </div>
+              <CyberToggle defaultChecked />
             </div>
-          </>
-        )}
-      </div>
-    </div>
+          </div>
+        </>
+      )}
+    </>
   );
 }

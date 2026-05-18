@@ -40,13 +40,10 @@ export default function MessageInput(props: {
               color: "var(--text-primary)",
             }}
             onFocus={(e) => {
-              e.currentTarget.style.borderColor = "var(--accent-cyan)";
-              e.currentTarget.style.boxShadow =
-                "0 0 0 2px rgba(0, 229, 255, 0.15)";
+              e.currentTarget.style.borderColor = "var(--border-focus)";
             }}
             onBlur={(e) => {
               e.currentTarget.style.borderColor = "var(--border-field)";
-              e.currentTarget.style.boxShadow = "none";
             }}
           />
         </div>
@@ -60,10 +57,10 @@ export default function MessageInput(props: {
           }}
           onMouseEnter={(e) => {
             if (!props.disabled && text.trim().length > 0)
-              e.currentTarget.style.filter = "brightness(1.15)";
+              e.currentTarget.style.opacity = "0.85";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.filter = "none";
+            e.currentTarget.style.opacity = "1";
           }}
         >
           {props.disabled || isSubmitting ? (

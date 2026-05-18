@@ -20,11 +20,11 @@ function SectionHeader({ icon: Icon, title }: { icon: LucideIcon; title: string 
       <div
         className="w-8 h-8 rounded-lg flex items-center justify-center"
         style={{
-          backgroundColor: "rgba(0, 229, 255, 0.08)",
-          border: "1px solid rgba(0, 229, 255, 0.15)",
+          backgroundColor: "var(--accent-soft)",
+          border: "1px solid var(--message-user-border)",
         }}
       >
-        <Icon size={16} style={{ color: "var(--accent-cyan)" }} />
+        <Icon size={16} style={{ color: "var(--accent-glow)" }} />
       </div>
       <div>
         <h3 className="font-semibold text-sm" style={{ color: "var(--text-primary)" }}>
@@ -50,8 +50,7 @@ function SectionDivider({ label }: { label: string }) {
       <div
         className="flex-1 h-px"
         style={{
-          background:
-            "linear-gradient(to right, var(--border-panel), transparent)",
+          backgroundColor: "var(--border-panel)",
         }}
       />
     </div>
@@ -298,7 +297,7 @@ export default function SettingsPanel(props: {
                     className="absolute right-2 top-1/2 -translate-y-1/2 motion-safe:transition-colors duration-150 ease-out"
                     style={{ color: "var(--text-muted)" }}
                     onMouseEnter={(e) =>
-                      (e.currentTarget.style.color = "var(--accent-cyan)")
+                      (e.currentTarget.style.color = "var(--accent-glow)")
                     }
                     onMouseLeave={(e) =>
                       (e.currentTarget.style.color = "var(--text-muted)")
@@ -318,14 +317,13 @@ export default function SettingsPanel(props: {
                         key={m}
                         className={`w-full text-left px-3 py-1.5 rounded text-micro font-mono motion-safe:transition-colors duration-150 ease-out ${
                           m === model
-                            ? "bg-[rgba(0,229,255,0.08)] border border-[rgba(0,229,255,0.2)]"
+                            ? ""
                             : "hover:bg-[rgba(255,255,255,0.02)] border border-transparent"
                         }`}
                         style={{
-                          color:
-                            m === model
-                              ? "var(--accent-cyan)"
-                              : "var(--text-muted)",
+                          color: m === model ? "var(--accent-glow)" : "var(--text-muted)",
+                          backgroundColor: m === model ? "var(--accent-soft)" : "transparent",
+                          borderColor: m === model ? "var(--border-focus)" : "transparent",
                         }}
                         onClick={() => setModel(m)}
                       >
@@ -434,7 +432,7 @@ export default function SettingsPanel(props: {
                     <span
                       style={{
                         color: healthStatus.healthy
-                          ? "var(--accent-cyan)"
+                          ? "var(--accent-glow)"
                           : "var(--danger)",
                       }}
                       className="text-micro"

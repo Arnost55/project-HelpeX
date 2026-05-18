@@ -28,8 +28,8 @@ export const CyberSelect = forwardRef<HTMLSelectElement, CyberSelectProps>(
             bg-[var(--bg-field)] text-[var(--text-primary)]
             border border-[var(--border-field)] ${t} font-medium
             appearance-none cursor-pointer
-            outline-none transition-[border-color,box-shadow] duration-150 ease-out
-            focus:border-[var(--accent-cyan)] focus:shadow-[0_0_0_2px_rgba(0,229,255,0.15)]
+            outline-none transition-[border-color] duration-150 ease-out
+            focus:border-[var(--border-focus)]
             disabled:opacity-40 disabled:cursor-not-allowed
             ${className}
           `.trim()}

@@ -450,27 +450,27 @@ export default function ChatPanel(props: { onNavigate?: (tab: "chat" | "settings
   return (
     <section key={sessionKey} className="flex flex-col h-full overflow-hidden">
       {/* Top Bar */}
-      <header className={`flex items-center justify-between px-5 py-3 border-b bg-[#0D1117]/50 ${isIncognito ? 'border-[#A78BFA]/30 incognito-glow-header' : 'border-[#30363D]'}`}>
+      <header className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: 'var(--border-panel)', backgroundColor: 'var(--bg-panel)' }}>
         <div className="flex items-center gap-4 min-w-0">
           <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-[#F0F6FC] truncate">
+            <h2 className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
               {activeConversation?.title ?? "No conversation"}
             </h2>
             <div className="flex items-center gap-3 mt-0.5">
-              <span className="flex items-center gap-1 text-[10px] text-[#8B949E]">
+              <span className="flex items-center gap-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
                 <Cpu size={10} />
                 {provider}
               </span>
-              <span className="flex items-center gap-1 text-[10px] text-[#8B949E]">
+              <span className="flex items-center gap-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
                 <Layers size={10} />
                 {model}
               </span>
-              <span className="flex items-center gap-1 text-[10px] text-[#8B949E]">
+              <span className="flex items-center gap-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
                 <Hash size={10} />
                 {conversationTokenEstimate} tok
               </span>
               {activeStreamProvider && (
-                <span className="flex items-center gap-1 text-[10px] text-cyan-400">
+                <span className="flex items-center gap-1 text-[10px]" style={{ color: 'var(--accent-glow)' }}>
                   <Wifi size={10} className="animate-pulse" />
                   {activeStreamProvider}
                 </span>
@@ -481,31 +481,46 @@ export default function ChatPanel(props: { onNavigate?: (tab: "chat" | "settings
 
         <div className="flex items-center gap-2">
           {isIncognito && (
-            <span className="incognito-badge flex items-center gap-1.5 px-3 py-1 rounded-lg text-[10px] font-semibold animate-pulse">
+            <span className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-[10px] font-semibold" style={{ backgroundColor: 'rgba(56, 189, 248, 0.08)', color: 'var(--accent-secondary)', border: '1px solid rgba(56, 189, 248, 0.15)' }}>
               <EyeOff size={10} />
               Private Session
             </span>
           )}
           {activeFallbackUsed && (
-            <span className="flex items-center gap-1 text-[10px] text-yellow-500 bg-yellow-500/10 px-2 py-1 rounded">
+            <span className="flex items-center gap-1 text-[10px] px-2 py-1 rounded" style={{ backgroundColor: 'rgba(255, 255, 255, 0.03)', color: 'var(--text-muted)', border: '1px solid var(--border-subtle)' }}>
               <AlertTriangle size={10} />
               Fallback active
             </span>
           )}
-          <div className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] ${healthOk ? 'text-green-500 bg-green-500/10' : 'text-[#8B949E] bg-[#21262D]'}`}>
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded text-[10px]" style={{
+            backgroundColor: healthOk ? 'rgba(0, 245, 184, 0.06)' : 'var(--bg-field)',
+            color: healthOk ? 'var(--accent-glow)' : 'var(--text-muted)',
+            border: healthOk ? '1px solid rgba(0, 245, 184, 0.15)' : '1px solid var(--border-subtle)',
+          }}>
             {healthOk ? <Wifi size={10} /> : <WifiOff size={10} />}
             {healthOk ? 'Connected' : 'No signal'}
           </div>
           <button
             onClick={handleToggleIncognito}
             disabled={!isIncognito && toggleLocked}
-            className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-[10px] font-medium transition-all duration-200 ${
-              !isIncognito && toggleLocked
-                ? 'text-[#484F58] bg-[#161B22] border border-[#21262D] cursor-not-allowed'
-                : isIncognito
-                  ? 'incognito-badge'
-                  : 'text-[#8B949E] bg-[#21262D] border border-[#30363D] hover:text-[#A78BFA] hover:border-[#A78BFA]/30'
-            }`}
+            className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-[10px] font-medium transition-all duration-200"
+            style={{
+              backgroundColor: isIncognito ? 'rgba(56, 189, 248, 0.08)' : 'transparent',
+              color: isIncognito ? 'var(--accent-secondary)' : 'var(--text-muted)',
+              border: isIncognito ? '1px solid rgba(56, 189, 248, 0.15)' : '1px solid var(--border-subtle)',
+              cursor: !isIncognito && toggleLocked ? 'not-allowed' : 'pointer',
+              opacity: !isIncognito && toggleLocked ? 0.4 : 1,
+            }}
+            onMouseEnter={(e) => {
+              if (isIncognito || (!isIncognito && toggleLocked)) return;
+              e.currentTarget.style.color = 'var(--accent-secondary)';
+              e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.3)';
+            }}
+            onMouseLeave={(e) => {
+              if (isIncognito || (!isIncognito && toggleLocked)) return;
+              e.currentTarget.style.color = 'var(--text-muted)';
+              e.currentTarget.style.borderColor = 'var(--border-subtle)';
+            }}
             title={
               !isIncognito && toggleLocked
                 ? "Start a New Chat to enable Privacy Mode."
@@ -518,15 +533,16 @@ export default function ChatPanel(props: { onNavigate?: (tab: "chat" | "settings
             {isIncognito ? 'Incognito' : 'Privacy'}
           </button>
           {!isIncognito && toggleLocked && (
-            <span className="flex items-center gap-1 text-[10px] text-[#8B949E] max-w-[140px] leading-tight">
-              <MessageSquarePlus size={10} className="flex-shrink-0 text-cyan-500" />
+            <span className="flex items-center gap-1 text-[10px] max-w-[140px] leading-tight" style={{ color: 'var(--text-muted)' }}>
+              <MessageSquarePlus size={10} className="flex-shrink-0" style={{ color: 'var(--accent-glow)' }} />
               New Chat to enable
             </span>
           )}
           {isStreaming ? (
             <button
               onClick={handleStop}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-500 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
+              style={{ color: 'var(--danger)', backgroundColor: 'var(--danger-soft)', border: '1px solid rgba(255, 51, 85, 0.2)' }}
             >
               <Square size={12} />
               Stop
@@ -537,9 +553,9 @@ export default function ChatPanel(props: { onNavigate?: (tab: "chat" | "settings
 
       {/* Error */}
       {error ? (
-        <div className="mx-5 mt-3 px-4 py-2.5 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center gap-2">
-          <AlertTriangle size={14} className="text-red-500 flex-shrink-0" />
-          <span className="text-xs text-red-400">{error}</span>
+        <div className="mx-5 mt-3 px-4 py-2.5 rounded-lg flex items-center gap-2" style={{ backgroundColor: 'var(--danger-soft)', border: '1px solid rgba(255, 51, 85, 0.15)' }}>
+          <AlertTriangle size={14} style={{ color: 'var(--danger)' }} className="flex-shrink-0" />
+          <span className="text-xs" style={{ color: 'var(--danger)' }}>{error}</span>
         </div>
       ) : null}
 
@@ -559,17 +575,17 @@ export default function ChatPanel(props: { onNavigate?: (tab: "chat" | "settings
       {/* Incognito Confirmation Dialog */}
       {incognitoConfirmOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="cyber-card p-6 max-w-sm w-full mx-4 shadow-2xl">
+          <div className="max-w-sm w-full mx-4 p-6 rounded-xl" style={{ backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-panel)' }}>
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-[#A78BFA]/10 border border-[#A78BFA]/20 flex items-center justify-center">
-                <EyeOff size={18} className="text-[#A78BFA]" />
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.15)' }}>
+                <EyeOff size={18} style={{ color: 'var(--accent-secondary)' }} />
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-[#F0F6FC]">End Private Session?</h3>
-                <p className="text-[10px] text-[#8B949E] mt-0.5">This will wipe the current session</p>
+                <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>End Private Session?</h3>
+                <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>This will wipe the current session</p>
               </div>
             </div>
-            <p className="text-xs text-[#8B949E] mb-5 leading-relaxed">
+            <p className="text-xs mb-5 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
               Turning off incognito mode will clear all messages from the current conversation
               and start a fresh session. No history will be saved from this session.
             </p>
@@ -582,7 +598,8 @@ export default function ChatPanel(props: { onNavigate?: (tab: "chat" | "settings
               </button>
               <button
                 onClick={wipeSession}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#A78BFA] to-[#8B5CF6] hover:shadow-[0_0_20px_rgba(167,139,250,0.3)] transition-all duration-200"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold"
+                style={{ backgroundColor: 'var(--danger)', color: '#fff', border: 'none' }}
               >
                 <Trash2 size={12} />
                 Wipe & Disable

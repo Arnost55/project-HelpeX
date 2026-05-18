@@ -30,7 +30,7 @@ export const CyberToggle = forwardRef<HTMLInputElement, CyberToggleProps>(
         <input ref={ref} type="checkbox" className="hidden" {...props} />
         <div
           className={`${track} rounded-full relative transition-colors duration-150 ease-out ${
-            props.checked ? "bg-[var(--accent-cyan)]" : "bg-[rgba(255,255,255,0.08)]"
+            props.checked ? "bg-[var(--accent-glow)]" : "bg-[rgba(255,255,255,0.08)]"
           }`}
         >
           <div

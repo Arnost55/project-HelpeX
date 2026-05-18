@@ -45,27 +45,29 @@ export default function QuickActionGrid(props: {
     <div className="flex flex-col items-center justify-center h-full px-8 py-12 overflow-y-auto">
       {/* Greeting */}
       <div className="text-center mb-8">
-        <h1 className="text-2xl font-bold text-[#F0F6FC] tracking-tight mb-2">Good morning, Commander</h1>
-        <p className="text-sm text-[#8B949E]">How can JARVIS assist you today?</p>
+        <h1 className="text-2xl font-bold tracking-tight mb-2" style={{ color: 'var(--text-primary)' }}>Good morning, Commander</h1>
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>How can JARVIS assist you today?</p>
       </div>
 
       {/* System Status */}
       <div className="flex items-center gap-4 mb-10">
-        <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs ${
-          systemStatus.connected ? "bg-green-500/10 text-green-400" : "bg-[#21262D] text-[#8B949E]"
-        }`}>
+        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs" style={{
+          backgroundColor: systemStatus.connected ? 'rgba(0, 245, 184, 0.06)' : 'var(--bg-field)',
+          color: systemStatus.connected ? 'var(--accent-glow)' : 'var(--text-muted)',
+          border: systemStatus.connected ? '1px solid rgba(0, 245, 184, 0.15)' : '1px solid var(--border-subtle)',
+        }}>
           {systemStatus.connected ? <Wifi size={12} /> : <WifiOff size={12} />}
           {systemStatus.connected ? `${systemStatus.latency}ms` : "Offline"}
         </div>
-        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#21262D] text-xs text-[#8B949E]">
+        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs" style={{ backgroundColor: 'var(--bg-field)', color: 'var(--text-muted)', border: '1px solid var(--border-subtle)' }}>
           <Cpu size={12} />
           {systemStatus.provider}
         </div>
-        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#21262D] text-xs text-[#8B949E]">
+        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs" style={{ backgroundColor: 'var(--bg-field)', color: 'var(--text-muted)', border: '1px solid var(--border-subtle)' }}>
           <Gauge size={12} />
           {systemStatus.successRate !== null ? `${systemStatus.successRate}% success` : "No data"}
         </div>
-        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-[#21262D] text-[#8B949E]">
+        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs" style={{ backgroundColor: 'var(--bg-field)', color: 'var(--text-muted)', border: '1px solid var(--border-subtle)' }}>
           <Wifi size={12} />
           Assistant Ready
         </div>
@@ -82,30 +84,41 @@ export default function QuickActionGrid(props: {
               key={action.id}
               onClick={() => props.onSendPrompt(action.id, `${action.prompt} `)}
               disabled={isAnyLoading}
-              className={`quick-action-btn group flex flex-col items-center gap-2 px-4 py-5 rounded-xl bg-[#161B22] border transition-all duration-200 ${
-                isLoading
-                  ? "border-cyan-500/40 opacity-50 cursor-not-allowed loading-pulse"
+              className="group flex flex-col items-center gap-2 px-4 py-5 rounded-xl transition-all duration-200"
+              style={{
+                backgroundColor: isLoading ? 'var(--accent-soft)' : 'var(--bg-panel)',
+                border: isLoading
+                  ? '1px solid var(--border-focus)'
                   : isAnyLoading
-                    ? "border-[#30363D] opacity-30 cursor-not-allowed"
-                    : "border-[#30363D] hover:border-cyan-500/30 hover:bg-[#1C2333] hover:shadow-[0_0_20px_rgba(0,245,255,0.08)] active:scale-[0.97] active:border-cyan-500/50"
-              }`}
+                    ? '1px solid var(--border-subtle)'
+                    : '1px solid var(--border-panel)',
+                opacity: isAnyLoading && !isLoading ? 0.3 : isLoading ? 0.5 : 1,
+                cursor: isAnyLoading ? 'not-allowed' : 'pointer',
+              }}
+              onMouseEnter={(e) => {
+                if (isAnyLoading) return;
+                e.currentTarget.style.borderColor = 'var(--border-focus)';
+                e.currentTarget.style.backgroundColor = 'var(--accent-soft)';
+              }}
+              onMouseLeave={(e) => {
+                if (isAnyLoading) return;
+                e.currentTarget.style.borderColor = 'var(--border-panel)';
+                e.currentTarget.style.backgroundColor = 'var(--bg-panel)';
+              }}
             >
-              <div className={`w-10 h-10 rounded-lg border flex items-center justify-center transition-all duration-200 ${
-                isLoading
-                  ? "bg-cyan-500/20 border-cyan-500/30"
-                  : isAnyLoading
-                    ? "bg-cyan-500/5 border-cyan-500/10"
-                    : "bg-cyan-500/10 border-cyan-500/20 group-hover:bg-cyan-500/20 group-hover:shadow-[0_0_12px_rgba(0,245,255,0.15)]"
-              }`}>
+              <div className="w-10 h-10 rounded-lg border flex items-center justify-center transition-all duration-200" style={{
+                backgroundColor: isLoading ? 'var(--accent-soft)' : 'var(--accent-soft)',
+                borderColor: 'var(--message-user-border)',
+              }}>
                 {isLoading ? (
-                  <Loader2 size={18} className="text-cyan-400 animate-spin" />
+                  <Loader2 size={18} style={{ color: 'var(--accent-glow)' }} className="animate-spin" />
                 ) : (
-                  <Icon size={18} className="text-cyan-400" />
+                  <Icon size={18} style={{ color: 'var(--accent-glow)' }} />
                 )}
               </div>
-              <span className={`text-xs font-medium transition-colors ${
-                isLoading ? "text-cyan-400" : isAnyLoading ? "text-[#8B949E]" : "text-[#C9D1D9] group-hover:text-[#F0F6FC]"
-              }`}>
+              <span className="text-xs font-medium transition-colors" style={{
+                color: isLoading ? 'var(--accent-glow)' : isAnyLoading ? 'var(--text-muted)' : 'var(--text-secondary)',
+              }}>
                 {isLoading ? "Processing..." : action.label}
               </span>
             </button>
@@ -115,7 +128,7 @@ export default function QuickActionGrid(props: {
 
       {/* Tips */}
       <div className="mt-10 text-center">
-        <p className="text-[10px] text-[#30363D] flex items-center justify-center gap-1">
+        <p className="text-[10px] flex items-center justify-center gap-1" style={{ color: 'var(--text-muted)' }}>
           <Sparkles size={10} />
           Type a message to start the conversation
         </p>

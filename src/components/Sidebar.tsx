@@ -24,7 +24,7 @@ export default function Sidebar(props: {
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-2">
-            <Bot size={14} style={{ color: 'var(--accent-cyan)' }} />
+            <Bot size={14} style={{ color: 'var(--accent-glow)' }} />
             <span className="sidebar-label">JARVIS</span>
           </div>
           <button

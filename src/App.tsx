@@ -78,7 +78,7 @@ export default function App(): JSX.Element {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-primary)' }}>
-      <aside className="w-64 h-full flex flex-col border-r shrink-0" style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'rgba(255,255,255,0.03)' }}>
+      <aside className="w-64 h-full flex flex-col border-r shrink-0" style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-panel)' }}>
         <Sidebar
           activeTab={activeTab}
           onSelectTab={setActiveTab}

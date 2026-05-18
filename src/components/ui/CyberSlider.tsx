@@ -13,15 +13,14 @@ export const CyberSlider = forwardRef<HTMLInputElement, CyberSliderProps>(
           type="range"
           className="
             flex-1 h-1 rounded-full appearance-none cursor-pointer
-            bg-[rgba(255,255,255,0.08)]
+            bg-[#222226]
             outline-none
             [&::-webkit-slider-thumb]:appearance-none
             [&::-webkit-slider-thumb]:w-3.5
             [&::-webkit-slider-thumb]:h-3.5
             [&::-webkit-slider-thumb]:rounded-full
             [&::-webkit-slider-thumb]:bg-[var(--accent-glow)]
-            [&::-webkit-slider-thumb]:border-2
-            [&::-webkit-slider-thumb]:border-[rgba(255,255,255,0.2)]
+            [&::-webkit-slider-thumb]:border-none
             [&::-webkit-slider-thumb]:cursor-pointer
             [&::-webkit-slider-thumb]:transition-transform
             [&::-webkit-slider-thumb]:duration-150
@@ -31,14 +30,13 @@ export const CyberSlider = forwardRef<HTMLInputElement, CyberSliderProps>(
             [&::-moz-range-thumb]:h-3.5
             [&::-moz-range-thumb]:rounded-full
             [&::-moz-range-thumb]:bg-[var(--accent-glow)]
-            [&::-moz-range-thumb]:border-2
-            [&::-moz-range-thumb]:border-[rgba(255,255,255,0.2)]
+            [&::-moz-range-thumb]:border-none
             [&::-moz-range-thumb]:cursor-pointer
           "
           {...props}
         />
         {valueLabel !== undefined && (
-          <span className="token-readout w-12 text-right tabular-nums text-[var(--accent-cyan)]">
+          <span className="token-readout w-12 text-right tabular-nums text-[var(--accent-glow)]">
             {valueLabel}
           </span>
         )}

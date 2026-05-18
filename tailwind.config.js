@@ -31,8 +31,7 @@ export default {
         'crisp': 'cubic-bezier(0.16, 1, 0.3, 1)',
       },
       boxShadow: {
-        'focus-cyan': '0 0 0 2px rgba(0, 229, 255, 0.15)',
-        'focus-glow': '0 0 0 2px rgba(0, 229, 255, 0.15)',
+        'focus': '0 0 0 1px var(--border-focus)',
       },
     },
   },

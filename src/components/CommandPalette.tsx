@@ -123,49 +123,51 @@ export default function CommandPalette(props: {
     >
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div
-        className="relative w-full max-w-[560px] bg-[#161B22] border border-[#30363D] rounded-2xl shadow-2xl overflow-hidden"
+        className="relative w-full max-w-[560px] rounded-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
+        style={{ backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-panel)' }}
       >
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-[#30363D]">
-          <Search size={16} className="text-[#8B949E] flex-shrink-0" />
+        <div className="flex items-center gap-3 px-4 py-3" style={{ borderBottom: '1px solid var(--border-panel)' }}>
+          <Search size={16} style={{ color: 'var(--text-muted)' }} className="flex-shrink-0" />
           <input
             ref={inputRef}
             type="text"
-            className="flex-1 bg-transparent text-sm text-[#F0F6FC] placeholder-[#8B949E] outline-none"
+            className="flex-1 bg-transparent text-sm outline-none"
+            style={{ color: 'var(--text-primary)' }}
             placeholder="Search commands..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
           />
-          <kbd className="text-[10px] font-mono text-[#8B949E] bg-[#21262D] px-1.5 py-0.5 rounded border border-[#30363D]">
+          <kbd className="text-[10px] font-mono px-1.5 py-0.5 rounded" style={{ color: 'var(--text-muted)', backgroundColor: 'var(--bg-field)', border: '1px solid var(--border-subtle)' }}>
             <Command size={10} className="inline mr-0.5" />K
           </kbd>
         </div>
         <div className="max-h-[320px] overflow-y-auto p-2">
           {filtered.length === 0 ? (
-            <div className="text-center py-8 text-xs text-[#8B949E]">No commands found</div>
+            <div className="text-center py-8 text-xs" style={{ color: 'var(--text-muted)' }}>No commands found</div>
           ) : (
             filtered.map((cmd, i) => {
               const Icon = cmd.icon;
               return (
                 <button
                   key={cmd.id}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${
-                    i === selectedIndex
-                      ? "bg-cyan-500/10 text-cyan-400"
-                      : "text-[#C9D1D9] hover:bg-[#21262D]"
-                  }`}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors"
+                  style={{
+                    backgroundColor: i === selectedIndex ? 'var(--accent-soft)' : 'transparent',
+                    color: i === selectedIndex ? 'var(--accent-glow)' : 'var(--text-primary)',
+                  }}
                   onClick={cmd.action}
                   onMouseEnter={() => setSelectedIndex(i)}
                 >
-                  <Icon size={16} className="flex-shrink-0 text-[#8B949E]" />
+                  <Icon size={16} className="flex-shrink-0" style={{ color: 'var(--text-muted)' }} />
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium">{cmd.label}</p>
-                    <p className={`text-[10px] mt-0.5 ${i === selectedIndex ? "text-cyan-400/60" : "text-[#8B949E]"}`}>
+                    <p className="text-[10px] mt-0.5" style={{ color: i === selectedIndex ? 'var(--accent-glow)' : 'var(--text-muted)', opacity: i === selectedIndex ? 0.6 : 1 }}>
                       {cmd.description}
                     </p>
                   </div>
-                  <ArrowRight size={12} className="flex-shrink-0 text-[#8B949E] opacity-0 group-hover:opacity-100" />
+                  <ArrowRight size={12} className="flex-shrink-0" style={{ color: 'var(--text-muted)' }} />
                 </button>
               );
             })

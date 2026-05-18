@@ -102,9 +102,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     motion-safe:transition-colors duration-150 ease-out
                   `}
                   style={{
-                    color: isActive ? "var(--accent-cyan)" : "var(--text-muted)",
+                    color: isActive ? "var(--accent-glow)" : "var(--text-muted)",
                     backgroundColor: isActive
-                      ? "rgba(0, 229, 255, 0.04)"
+                      ? "var(--accent-soft)"
                       : "transparent",
                   }}
                   onMouseEnter={(e) => {

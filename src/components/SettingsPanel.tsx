@@ -1,8 +1,10 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useSettingsStore } from "../store/settingsStore";
 import { checkProviderHealth, listProviderModels } from "../api/providers";
 import { getAvailableThemes, type ThemeDefinition } from "../api/settingsApi";
 import { useDebouncedSave } from "../hooks/useDebouncedSave";
+import { useMcp } from "../hooks/useMcp";
 import { CyberInput, CyberSelect, CyberToggle, CyberSlider } from "./ui";
 import {
   Brain, Cpu, Thermometer, Layers, Palette, Monitor, Type, Code, PlugZap,
@@ -103,6 +105,30 @@ export default function SettingsPanel(props: {
   const [interfaceFont, setInterfaceFont] = useState("Manrope");
   const [codeFont, setCodeFont] = useState("Fira Code");
   const [availableThemes, setAvailableThemes] = useState<ThemeDefinition[]>([]);
+
+  const { discoveredTools, isLoading, error: mcpError, connect } = useMcp();
+
+  const [serverName, setServerName] = useState("");
+  const [serverCmd, setServerCmd] = useState("");
+  const [serverArgs, setServerArgs] = useState("");
+
+  const handleConnectServer = useCallback(async () => {
+    if (!serverName || !serverCmd) return;
+    try {
+      const argsArray = serverArgs.split(" ").filter((a) => a.trim() !== "");
+      await invoke("mcp_add_and_spawn_server", {
+        name: serverName,
+        cmd: serverCmd,
+        args: argsArray,
+      });
+      await connect(serverCmd, argsArray);
+      setServerName("");
+      setServerCmd("");
+      setServerArgs("");
+    } catch (err) {
+      console.error("Failed to connect MCP server:", err);
+    }
+  }, [serverName, serverCmd, serverArgs, connect]);
 
   const { schedule } = useDebouncedSave(600);
   const prevValues = useRef({ provider, model, theme, temperature, maxTokens });
@@ -537,6 +563,105 @@ export default function SettingsPanel(props: {
                   />
                 </div>
               ))}
+            </div>
+          </div>
+
+          <div className="cyber-card">
+            <SectionHeader icon={PlugZap} title="MCP Servers" />
+
+            <div
+              className="mb-4 p-4 rounded-xl border border-[var(--border-subtle)] flex flex-col gap-3"
+              style={{ backgroundColor: "var(--bg-panel)" }}
+            >
+              <div className="text-[11px] font-mono text-[var(--text-muted)] uppercase tracking-wider font-bold">
+                Register New Protocol Node
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <input
+                  type="text"
+                  placeholder="Server Identifier (e.g., Filesystem)"
+                  value={serverName}
+                  onChange={(e) => setServerName(e.target.value)}
+                  className="p-2 text-[13px] rounded-lg bg-[#070708] border border-[var(--border-subtle)] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)] transition-all"
+                />
+                <input
+                  type="text"
+                  placeholder="Executable (npx, uvx, node)"
+                  value={serverCmd}
+                  onChange={(e) => setServerCmd(e.target.value)}
+                  className="p-2 text-[13px] rounded-lg bg-[#070708] border border-[var(--border-subtle)] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)] transition-all"
+                />
+                <input
+                  type="text"
+                  placeholder="Arguments (e.g., @modelcontextprotocol/server-filesystem)"
+                  value={serverArgs}
+                  onChange={(e) => setServerArgs(e.target.value)}
+                  className="p-2 text-[13px] rounded-lg bg-[#070708] border border-[var(--border-subtle)] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)] transition-all"
+                />
+              </div>
+
+              <button
+                onClick={handleConnectServer}
+                className="self-end px-4 py-1.5 rounded-lg border text-[11px] font-mono font-bold uppercase tracking-wider bg-transparent transition-all hover:bg-[rgba(0,245,184,0.05)]"
+                style={{ borderColor: "rgba(0, 245, 184, 0.2)", color: "var(--accent-glow)" }}
+              >
+                Initialize Node
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              {isLoading && (
+                <div className="text-[13px] font-mono text-[var(--text-muted)] animate-pulse">
+                  Scanning stdio transport channels...
+                </div>
+              )}
+
+              {mcpError && (
+                <div className="p-3 rounded-lg border border-red-900/30 bg-red-950/10 text-[13px] text-red-400 font-mono">
+                  Error: {mcpError}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-3">
+                {discoveredTools.map((tool) => (
+                  <div
+                    key={tool.name}
+                    className="p-4 rounded-xl border border-[var(--border-subtle)] flex flex-col gap-2 transition-all duration-150 hover:bg-white/[0.01]"
+                    style={{ backgroundColor: "var(--bg-panel)" }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[13px] font-bold text-[var(--accent-glow)] font-mono">
+                        {tool.name}
+                      </span>
+                      <span className="text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded bg-white/5 text-[var(--text-primary)] border border-white/5">
+                        Ready
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">
+                      {tool.description || "No technical description provided by host server."}
+                    </p>
+                    {tool.inputSchema?.properties && (
+                      <div className="mt-1 pt-2 border-t border-white/[0.02] flex flex-wrap gap-1.5">
+                        {Object.keys(tool.inputSchema.properties).map((prop) => (
+                          <span
+                            key={prop}
+                            className="text-[10px] font-mono text-[var(--text-muted)] bg-black/40 px-1.5 py-0.5 rounded border border-white/[0.02]"
+                          >
+                            arg: {prop}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {discoveredTools.length === 0 && !isLoading && (
+                  <div className="text-center py-6 border border-dashed border-[var(--border-subtle)] rounded-xl text-[13px] text-[var(--text-muted)]">
+                    No active protocol tools detected. Connect an MCP server to get started.
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </>

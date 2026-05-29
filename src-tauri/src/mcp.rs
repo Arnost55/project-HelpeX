@@ -1,190 +1,159 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
-use tokio::process::Command;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::Child;
+use tokio::sync::Mutex;
+use tokio::sync::mpsc;
 
-pub struct McpClient {
-    _child: tokio::process::Child,
-    stdin: BufWriter<tokio::process::ChildStdin>,
-    stdout: BufReader<tokio::process::ChildStdout>,
-    request_id: AtomicU64,
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct McpToolProperty {
+    pub r#type: String,
+    pub description: Option<String>,
 }
 
-impl McpClient {
-    pub async fn spawn_server(command: &str, args: &[String]) -> Result<Self, String> {
-        let mut child = Command::new(command)
-            .args(args)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .map_err(|e| {
-                format!(
-                    "Failed to spawn MCP server '{}': {}. Is it installed?",
-                    command, e
-                )
-            })?;
-
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| "Failed to capture MCP server stdin".to_string())?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| "Failed to capture MCP server stdout".to_string())?;
-
-        Ok(McpClient {
-            _child: child,
-            stdin: BufWriter::new(stdin),
-            stdout: BufReader::new(stdout),
-            request_id: AtomicU64::new(1),
-        })
-    }
-
-    pub async fn initialize_handshake(&mut self) -> Result<Value, String> {
-        let result = self
-            .send_request(
-                "initialize",
-                Some(serde_json::json!({
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {},
-                    "clientInfo": {
-                        "name": "jarvis-ai",
-                        "version": "0.1.0"
-                    }
-                })),
-            )
-            .await?;
-
-        self.send_notification("notifications/initialized", None)
-            .await?;
-
-        Ok(result)
-    }
-
-    pub async fn list_tools(&mut self) -> Result<Value, String> {
-        self.send_request("tools/list", None).await
-    }
-
-    pub async fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, String> {
-        self.send_request(
-            "tools/call",
-            Some(serde_json::json!({ "name": name, "arguments": arguments })),
-        )
-        .await
-    }
-
-    async fn send_request(&mut self, method: &str, params: Option<Value>) -> Result<Value, String> {
-        let id = self.request_id.fetch_add(1, Ordering::SeqCst);
-
-        let request = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": method,
-            "params": params.unwrap_or(serde_json::json!({})),
-        });
-
-        self.write_line(&serde_json::to_string(&request).map_err(|e| e.to_string())?)
-            .await?;
-
-        let response_line = self.read_line().await?;
-
-        let response: Value = serde_json::from_str(&response_line)
-            .map_err(|e| format!("Failed to parse MCP response: {} (raw: {})", e, response_line))?;
-
-        if let Some(error) = response.get("error") {
-            let msg = error
-                .get("message")
-                .and_then(Value::as_str)
-                .unwrap_or("unknown mcp error");
-            return Err(format!("MCP server error: {}", msg));
-        }
-
-        Ok(response.get("result").cloned().unwrap_or(Value::Null))
-    }
-
-    async fn send_notification(&mut self, method: &str, params: Option<Value>) -> Result<(), String> {
-        let notification = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params.unwrap_or(serde_json::json!({})),
-        });
-
-        self.write_line(&serde_json::to_string(&notification).map_err(|e| e.to_string())?)
-            .await
-    }
-
-    async fn write_line(&mut self, line: &str) -> Result<(), String> {
-        let mut payload = line.to_string();
-        payload.push('\n');
-        self.stdin
-            .write_all(payload.as_bytes())
-            .await
-            .map_err(|e| format!("Failed to write to MCP stdin: {}", e))?;
-        self.stdin
-            .flush()
-            .await
-            .map_err(|e| format!("Failed to flush MCP stdin: {}", e))
-    }
-
-    async fn read_line(&mut self) -> Result<String, String> {
-        let mut line = String::new();
-        self.stdout
-            .read_line(&mut line)
-            .await
-            .map_err(|e| format!("Failed to read from MCP stdout: {}", e))?;
-        let trimmed = line.trim().to_string();
-        if trimmed.is_empty() {
-            return Err("MCP server closed the connection".to_string());
-        }
-        Ok(trimmed)
-    }
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct McpToolSchema {
+    pub r#type: String,
+    pub properties: HashMap<String, McpToolProperty>,
+    pub required: Option<Vec<String>>,
 }
 
-pub struct McpState {
-    pub client: tokio::sync::Mutex<Option<McpClient>>,
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct McpTool {
+    pub name: String,
+    pub description: Option<String>,
+    pub input_schema: McpToolSchema,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct JsonRpcRequest {
+    pub jsonrpc: String,
+    pub method: String,
+    pub params: serde_json::Value,
+    pub id: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct JsonRpcResponse {
+    pub jsonrpc: String,
+    pub id: u64,
+    pub result: Option<serde_json::Value>,
+    pub error: Option<serde_json::Value>,
+}
+
+#[allow(dead_code)]
+pub struct ActiveServer {
+    pub process: Child,
+    pub stdin_tx: mpsc::Sender<String>,
+    pub tools: Vec<McpTool>,
+}
+
+#[derive(Default)]
+pub struct McpSystemState {
+    pub servers: Arc<Mutex<HashMap<String, ActiveServer>>>,
 }
 
 #[tauri::command]
-pub async fn mcp_connect(
-    state: State<'_, McpState>,
-    command: String,
-    args: Vec<String>,
-) -> Result<String, String> {
-    let mut client = McpClient::spawn_server(&command, &args).await?;
-    let _server_info = client.initialize_handshake().await?;
-
-    let mut guard = state.client.lock().await;
-    *guard = Some(client);
-
-    eprintln!("[MCP] Connected: {} {:?}", command, args);
-    Ok("connected".to_string())
-}
-
-#[tauri::command]
-pub async fn mcp_get_tools(state: State<'_, McpState>) -> Result<Value, String> {
-    let mut guard = state.client.lock().await;
-    let client = guard
-        .as_mut()
-        .ok_or_else(|| "MCP server is not connected".to_string())?;
-    client.list_tools().await
-}
-
-#[tauri::command]
-pub async fn mcp_call_tool(
-    state: State<'_, McpState>,
+pub async fn mcp_spawn_and_initialize(
+    state: State<'_, McpSystemState>,
     name: String,
-    arguments: Value,
-) -> Result<Value, String> {
-    let mut guard = state.client.lock().await;
-    let client = guard
-        .as_mut()
-        .ok_or_else(|| "MCP server is not connected".to_string())?;
-    client.call_tool(&name, arguments).await
+    cmd: String,
+    args: Vec<String>,
+) -> Result<Vec<McpTool>, String> {
+    println!("📡 [MCP Backend] Initializing node process: {} via {} {:?}", name, cmd, args);
+
+    let mut child = tokio::process::Command::new(&cmd)
+        .args(&args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Process spawning initiation failure: {}", e))?;
+
+    let mut stdin = child.stdin.take().ok_or("Failed to seize child stdin channel handle")?;
+    let stdout = child.stdout.take().ok_or("Failed to seize child stdout channel handle")?;
+
+    let init_req = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        method: "initialize".to_string(),
+        id: 1,
+        params: serde_json::json!({
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": { "name": "JARVIS-Desktop", "version": "1.0.0" }
+        }),
+    };
+
+    let raw_payload = serde_json::to_string(&init_req).unwrap() + "\n";
+    stdin.write_all(raw_payload.as_bytes()).await.map_err(|e| e.to_string())?;
+    stdin.flush().await.map_err(|e| e.to_string())?;
+
+    let mut reader = BufReader::new(stdout).lines();
+    let mut discovered_tools = Vec::new();
+
+    if let Some(line) = reader.next_line().await.map_err(|e| e.to_string())? {
+        let res: JsonRpcResponse = serde_json::from_str(&line)
+            .map_err(|e| format!("Handshake frame parsing error: {} | Content: {}", e, line))?;
+
+        if let Some(error) = res.error {
+            return Err(format!("Host node rejected protocol configuration: {:?}", error));
+        }
+
+        let list_req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            method: "tools/list".to_string(),
+            id: 2,
+            params: serde_json::json!({}),
+        };
+
+        let list_payload = serde_json::to_string(&list_req).unwrap() + "\n";
+        stdin.write_all(list_payload.as_bytes()).await.map_err(|e| e.to_string())?;
+        stdin.flush().await.map_err(|e| e.to_string())?;
+
+        if let Some(list_line) = reader.next_line().await.map_err(|e| e.to_string())? {
+            let list_res: JsonRpcResponse = serde_json::from_str(&list_line)
+                .map_err(|e| format!("Tools response frame breakdown error: {}", e))?;
+
+            if let Some(result) = list_res.result {
+                if let Some(tools_array) = result.get("tools") {
+                    discovered_tools = serde_json::from_value::<Vec<McpTool>>(tools_array.clone())
+                        .map_err(|e| format!("Schema composition mapping failure: {}", e))?;
+                }
+            }
+        }
+    }
+
+    let (stdin_tx, mut stdin_rx) = mpsc::channel::<String>(32);
+    tokio::spawn(async move {
+        while let Some(msg) = stdin_rx.recv().await {
+            let _ = stdin.write_all((msg + "\n").as_bytes()).await;
+            let _ = stdin.flush().await;
+        }
+    });
+
+    let mut active_map = state.servers.lock().await;
+    active_map.insert(name, ActiveServer {
+        process: child,
+        stdin_tx,
+        tools: discovered_tools.clone(),
+    });
+
+    Ok(discovered_tools)
+}
+
+#[tauri::command]
+pub async fn mcp_get_active_tools(
+    state: State<'_, McpSystemState>,
+) -> Result<HashMap<String, Vec<McpTool>>, String> {
+    let active_map = state.servers.lock().await;
+    let mut summary = HashMap::new();
+    for (k, v) in active_map.iter() {
+        summary.insert(k.clone(), v.tools.clone());
+    }
+    Ok(summary)
 }
 
 // ─── Multi-Server Registration & Persistence ─────────────────────────────
@@ -201,6 +170,7 @@ fn config_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(app_data.join("mcp-servers.json"))
 }
 
+#[allow(dead_code)]
 pub fn save_server_configs(app: &AppHandle, configs: &[McpServerConfig]) -> Result<(), String> {
     let path = config_path(app)?;
     if let Some(parent) = path.parent() {
@@ -217,39 +187,4 @@ pub fn load_server_configs(app: &AppHandle) -> Result<Vec<McpServerConfig>, Stri
     }
     let json = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     serde_json::from_str(&json).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn mcp_add_and_spawn_server(
-    state: State<'_, McpState>,
-    app: AppHandle,
-    name: String,
-    cmd: String,
-    args: Vec<String>,
-) -> Result<String, String> {
-    let mut client = McpClient::spawn_server(&cmd, &args).await?;
-    let server_info = client.initialize_handshake().await?;
-
-    let mut guard = state.client.lock().await;
-    *guard = Some(client);
-
-    let label = server_info
-        .get("serverInfo")
-        .and_then(|si| si.get("name"))
-        .and_then(Value::as_str)
-        .unwrap_or(&name)
-        .to_string();
-
-    eprintln!("[MCP] Registered & connected: {} (server={})", name, label);
-
-    let mut configs = load_server_configs(&app)?;
-    configs.retain(|c| c.name != name);
-    configs.push(McpServerConfig {
-        name: name.clone(),
-        cmd,
-        args: args,
-    });
-    save_server_configs(&app, &configs)?;
-
-    Ok(label)
 }

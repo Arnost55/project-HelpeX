@@ -14,7 +14,7 @@
 
 **Data flow:** User types → `handleSend()` calls `invoke("stream_chat")` → Rust spawns async stream → SSE chunks emitted as Tauri events → frontend listeners append tokens to zustand store.
 
-**MCP bridge:** Removed legacy tool-calling bridge. MCP integration will be handled by the standard protocol implementation.
+**MCP bridge:** Legacy tool-calling bridge removed; standard MCP foundation implemented with stdio + JSON-RPC handshake.
 
 ---
 
@@ -39,6 +39,8 @@ All Tauri commands registered in `src-tauri/src/lib.rs:52-74` and implemented in
 | `save_app_settings` | Frontend→Backend | XOR+Base64 encrypt settings to `jarvis-config.dat` |
 | `load_app_settings` | Frontend→Backend | Decrypt and load config file (V2 + legacy fallback) |
 | `run_jarvis_task` | Frontend→Backend | Non-streaming quick action (explain, write, debug, etc.) |
+| `mcp_spawn_and_initialize` | Frontend→Backend | Spawn MCP server, initialize JSON-RPC, list tools |
+| `mcp_get_active_tools` | Frontend→Backend | List active MCP servers and their tools |
 
 **Event streams (Backend→Frontend):**
 | Event | Payload | Purpose |
@@ -132,7 +134,7 @@ All Tauri commands registered in `src-tauri/src/lib.rs:52-74` and implemented in
 1. **No Electron/WebView2:** Uses Tauri v2 (Rust backend, system WebView). No separate IPC bridge file — all IPC is via `@tauri-apps/api/core` `invoke()`.
 2. **Incognito enforcement happens on BOTH sides:** Frontend blocks persistence calls + filter in partialize; Rust side checks `incognito` flag in `save_conversation`/`save_message`.
 3. **Stream cancellation via oneshot channel:** `STREAM_CANCEL_REGISTRY` maps `stream_id` → `oneshot::Sender<()>`. Cancel sends on the channel; the stream task exits via `tokio::select!`.
-4. **MCP tool calling loop:** Removed with legacy tool integration cleanup.
+4. **MCP tool calling loop:** Foundation implemented; tool loop integration pending.
 5. **Config encryption:** XOR key (`j4rv1s_c0nfig_s4lt_x0r_2024!`) + Base64 encoding (V2). Legacy hex format still supported for backward compatibility.
 6. **No ESLint/Prettier:** No lint config found. Use `npm run tauri build` or `python build-modular.py --release` to compile.
 

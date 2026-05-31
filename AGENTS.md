@@ -122,13 +122,15 @@ This dual-output setup means the .dll files are available for:
 **After completing any code change, always commit and push immediately.**
 
 1. Stage only the files YOU changed (check `git status`)
-2. Write a concise commit message describing exactly what was done
+2. Write a **conventional commit** message describing exactly what was done
 3. Push to the remote
 
 ```bash
 git add <files>
-git commit -m "description of change"
+git commit -m "<type>: <description>"
 git push
 ```
+
+**Types:** `feat:` (new feature), `fix:` (bug fix), `refactor:`, `chore:`, `docs:`, `style:`, `perf:`, `test:`
 
 Do NOT batch multiple changes into one commit — each task gets its own commit.

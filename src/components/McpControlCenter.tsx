@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useMcp } from "../hooks/useMcp";
 
 export const McpControlCenter: React.FC = () => {
-    const { activeServers, isLoading, error, registerNewNode } = useMcp();
+    const { activeServers, isLoading, error, registerNewNode, removeNode } = useMcp();
     const [nodeName, setNodeName] = useState("");
     const [nodeCmd, setNodeCmd] = useState("");
     const [nodeArgs, setNodeArgs] = useState("");
@@ -104,9 +104,17 @@ export const McpControlCenter: React.FC = () => {
                                 <div className="w-1.5 h-1.5 rounded-full bg-[#00f5b8] animate-pulse shadow-[0_0_8px_#00f5b8]" />
                                 <span className="text-[14px] font-bold text-[#f4f4f5] font-mono">{serverName}</span>
                             </div>
-                            <span className="text-[10px] font-mono uppercase text-[#6b7280]">
-                                {tools.length} functional handles active
-                            </span>
+                            <div className="flex items-center gap-4">
+                                <span className="text-[10px] font-mono uppercase text-[#6b7280]">
+                                    {tools.length} handles active
+                                </span>
+                                <button
+                                    onClick={() => removeNode(serverName)}
+                                    className="text-[10px] font-mono uppercase tracking-wider text-[#71717a] hover:text-red-400 border border-transparent hover:border-red-900/30 hover:bg-red-950/10 px-2 py-0.5 rounded transition-all duration-150"
+                                >
+                                    Disconnect
+                                </button>
+                            </div>
                         </div>
 
                         <div className="grid grid-cols-1 gap-2.5 mt-1">

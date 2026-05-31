@@ -35,7 +35,7 @@ pub fn run() {
             notifications::notify_info(&app_handle, "JARVIS AI", "Application started successfully");
 
             // Auto-restore persisted MCP server configs
-            if let Ok(configs) = mcp::load_server_configs(&app_handle) {
+            if let Ok(configs) = mcp::load_persisted_servers(&app_handle) {
                 for cfg in configs {
                     if cfg.cmd.is_empty() {
                         continue;
@@ -77,6 +77,8 @@ pub fn run() {
             commands::list_available_themes,
             mcp::mcp_spawn_and_initialize,
             mcp::mcp_get_active_tools,
+            mcp::mcp_disconnect_server,
+            mcp::mcp_hydrate_saved_servers,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

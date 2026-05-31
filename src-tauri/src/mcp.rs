@@ -58,12 +58,14 @@ pub struct McpSystemState {
 
 #[tauri::command]
 pub async fn mcp_spawn_and_initialize(
-    state: State<'_, McpSystemState>,
+    app_handle: AppHandle,
     name: String,
     cmd: String,
     args: Vec<String>,
 ) -> Result<Vec<McpTool>, String> {
     println!("📡 [MCP Backend] Initializing node process: {} via {} {:?}", name, cmd, args);
+
+    let state = app_handle.state::<McpSystemState>();
 
     let mut child = tokio::process::Command::new(&cmd)
         .args(&args)
@@ -134,12 +136,30 @@ pub async fn mcp_spawn_and_initialize(
         }
     });
 
+    let server_name = name.clone();
     let mut active_map = state.servers.lock().await;
     active_map.insert(name, ActiveServer {
         process: child,
         stdin_tx,
         tools: discovered_tools.clone(),
     });
+
+    // Persist to disk
+    let mut persisted = load_persisted_servers(&app_handle).unwrap_or_default();
+    if let Some(pos) = persisted.iter().position(|s| s.name == server_name) {
+        persisted[pos] = PersistedServer {
+            name: server_name.clone(),
+            cmd: cmd.clone(),
+            args: args.clone(),
+        };
+    } else {
+        persisted.push(PersistedServer {
+            name: server_name.clone(),
+            cmd: cmd.clone(),
+            args: args.clone(),
+        });
+    }
+    let _ = save_persisted_servers(&app_handle, &persisted);
 
     Ok(discovered_tools)
 }
@@ -156,23 +176,80 @@ pub async fn mcp_get_active_tools(
     Ok(summary)
 }
 
+#[tauri::command]
+pub async fn mcp_disconnect_server(
+    app_handle: AppHandle,
+    name: String,
+) -> Result<(), String> {
+    println!("🔌 [Tauri Backend] Request to disconnect and terminate node: {}", name);
+
+    let state = app_handle.state::<McpSystemState>();
+    let mut active_map = state.servers.lock().await;
+
+    if let Some(mut server) = active_map.remove(&name) {
+        match server.process.kill().await {
+            Ok(_) => {
+                println!("✅ [Tauri Backend] Successfully terminated background process for: {}", name);
+
+                // Remove from persisted config
+                let mut persisted = load_persisted_servers(&app_handle).unwrap_or_default();
+                persisted.retain(|s| s.name != name);
+                let _ = save_persisted_servers(&app_handle, &persisted);
+
+                Ok(())
+            }
+            Err(e) => {
+                Err(format!("Server record dropped, but process termination failed: {}", e))
+            }
+        }
+    } else {
+        Err(format!("No active protocol node found with identifier: {}", name))
+    }
+}
+
+#[tauri::command]
+pub async fn mcp_hydrate_saved_servers(
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let persisted = load_persisted_servers(&app_handle)?;
+    println!("🔄 [Tauri Backend] Dehydrating {} saved MCP server node profiles...", persisted.len());
+
+    for server in persisted {
+        let handle = app_handle.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = mcp_spawn_and_initialize(
+                handle.clone(),
+                server.name,
+                server.cmd,
+                server.args,
+            ).await {
+                eprintln!("[MCP] Hydration failed for saved server: {}", e);
+            }
+        });
+    }
+
+    Ok(())
+}
+
 // ─── Multi-Server Registration & Persistence ─────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpServerConfig {
+pub struct PersistedServer {
     pub name: String,
     pub cmd: String,
     pub args: Vec<String>,
 }
 
-fn config_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    Ok(app_data.join("mcp-servers.json"))
+pub fn get_mcp_config_path(app_handle: &AppHandle) -> std::path::PathBuf {
+    app_handle.path()
+        .app_config_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join("mcp_config.dat")
 }
 
 #[allow(dead_code)]
-pub fn save_server_configs(app: &AppHandle, configs: &[McpServerConfig]) -> Result<(), String> {
-    let path = config_path(app)?;
+fn save_persisted_servers(app: &AppHandle, configs: &[PersistedServer]) -> Result<(), String> {
+    let path = get_mcp_config_path(app);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -180,8 +257,8 @@ pub fn save_server_configs(app: &AppHandle, configs: &[McpServerConfig]) -> Resu
     std::fs::write(&path, &json).map_err(|e| e.to_string())
 }
 
-pub fn load_server_configs(app: &AppHandle) -> Result<Vec<McpServerConfig>, String> {
-    let path = config_path(app)?;
+pub fn load_persisted_servers(app: &AppHandle) -> Result<Vec<PersistedServer>, String> {
+    let path = get_mcp_config_path(app);
     if !path.exists() {
         return Ok(Vec::new());
     }

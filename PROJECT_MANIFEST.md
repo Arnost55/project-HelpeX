@@ -14,7 +14,7 @@
 
 **Data flow:** User types → `handleSend()` calls `invoke("stream_chat")` → Rust spawns async stream → SSE chunks emitted as Tauri events → frontend listeners append tokens to zustand store.
 
-**MCP bridge:** Legacy tool-calling bridge removed; standard MCP foundation implemented with stdio + JSON-RPC handshake.
+**MCP bridge:** Legacy tool-calling bridge removed; standard MCP foundation implemented with stdio + JSON-RPC handshake. MCP servers persist to disk (`mcp_config.dat`) and auto-restore on app startup. Disconnect support via `mcp_disconnect_server` (kills process + removes from persisted config).
 
 ---
 
@@ -29,6 +29,7 @@ All Tauri commands registered in `src-tauri/src/lib.rs:52-74` and implemented in
 | `list_conversations` | Frontend→Backend | Load all conversation headers |
 | `list_messages` | Frontend→Backend | Load messages for a conversation |
 | `delete_conversation` | Frontend→Backend | Remove conversation + messages from SQLite |
+| `delete_chat` | Frontend→Backend | Full wipe of a specific chat ID |
 | `hard_delete_session` | Frontend→Backend | Same as delete but returns `DeleteResult` with error info |
 | `wipe_incognito_session` | Frontend→Backend | Clear WebView storage + notify |
 | `wipe_all_data` | Frontend→Backend | SQLite wipe + config.dat delete + WebView clear |
@@ -39,8 +40,10 @@ All Tauri commands registered in `src-tauri/src/lib.rs:52-74` and implemented in
 | `save_app_settings` | Frontend→Backend | XOR+Base64 encrypt settings to `jarvis-config.dat` |
 | `load_app_settings` | Frontend→Backend | Decrypt and load config file (V2 + legacy fallback) |
 | `run_jarvis_task` | Frontend→Backend | Non-streaming quick action (explain, write, debug, etc.) |
-| `mcp_spawn_and_initialize` | Frontend→Backend | Spawn MCP server, initialize JSON-RPC, list tools |
+| `mcp_spawn_and_initialize` | Frontend→Backend | Spawn MCP server, initialize JSON-RPC, list tools, persist to `mcp_config.dat` |
 | `mcp_get_active_tools` | Frontend→Backend | List active MCP servers and their tools |
+| `mcp_disconnect_server` | Frontend→Backend | Kill MCP server process + remove from persisted config |
+| `mcp_hydrate_saved_servers` | Frontend→Backend | Re-spawn all saved MCP servers from `mcp_config.dat` |
 
 **Event streams (Backend→Frontend):**
 | Event | Payload | Purpose |
@@ -99,9 +102,21 @@ All Tauri commands registered in `src-tauri/src/lib.rs:52-74` and implemented in
 | `MessageList.tsx` | Message rendering with react-markdown, code blocks, typing indicator |
 | `MessageInput.tsx` | Textarea + submit |
 | `QuickActionGrid.tsx` | 6 quick action buttons (explain, write, etc.) |
-| `SettingsPanel.tsx` | Full settings UI: AI, Integration, Appearance, System tabs |
+| `SettingsPanel.tsx` | Full settings UI: AI, Integration, Appearance, System tabs — includes `McpControlCenter` |
+| `SettingsModal.tsx` | Split-pane modal overlay wrapping SettingsPanel |
+| `McpControlCenter.tsx` | MCP server registration form + active server tool listing |
 | `CommandPalette.tsx` | Ctrl+K palette for navigation |
 | `ToastContainer.tsx` | Toast notification display |
+| `ui/CyberInput.tsx` | Cyber-themed text input primitive |
+| `ui/CyberSelect.tsx` | Cyber-themed select dropdown primitive |
+| `ui/CyberSlider.tsx` | Cyber-themed slider primitive |
+| `ui/CyberToggle.tsx` | Cyber-themed toggle switch primitive |
+
+### Logic (`src/hooks/`)
+| File | Role |
+|---|---|
+| `useMcp.ts` | MCP server lifecycle: register, disconnect, hydrate auto-restore, refresh tools |
+| `useDebouncedSave.ts` | Debounced settings sync to disk via Tauri invoke |
 
 ### Logic (`src/utils/`)
 | File | Role |

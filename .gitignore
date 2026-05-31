@@ -8,3 +8,5 @@ src-tauri/gen/
 JARVIS_AI_COMPREHENSIVE_PLAN.md
 .opencode/
 .cargo/
+ECC-fix/
+patches/

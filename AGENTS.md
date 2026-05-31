@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+**Package manager: This project uses `npm` only.** Do not use `bun`, `pnpm`, or `yarn` for any commands.
+
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.

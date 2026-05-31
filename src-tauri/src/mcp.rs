@@ -9,12 +9,14 @@ use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct McpToolProperty {
     pub r#type: String,
     pub description: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct McpToolSchema {
     pub r#type: String,
     pub properties: HashMap<String, McpToolProperty>,
@@ -22,6 +24,7 @@ pub struct McpToolSchema {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct McpTool {
     pub name: String,
     pub description: Option<String>,

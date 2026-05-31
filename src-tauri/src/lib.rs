@@ -98,23 +98,28 @@ async fn auto_spawn_and_register(
     let resolved_cmd = mcp::resolve_executable_path(cmd);
     println!("🔍 [Tauri Path Resolver] Resolved raw token '{}' to absolute target path: '{}'", cmd, resolved_cmd);
 
-    let mut child = tokio::process::Command::new(&resolved_cmd)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                format!(
-                    "Executable '{}' could not be resolved by your OS environment. Current Tauri PATH search scope: {:?}", 
-                    cmd, 
-                    std::env::var("PATH").unwrap_or_default()
-                )
-            } else {
-                format!("Process execution runtime block failure: {}", e)
-            }
-        })?;
+    let mut command_builder = tokio::process::Command::new(&resolved_cmd);
+    command_builder.args(args);
+    command_builder.stdin(Stdio::piped());
+    command_builder.stdout(Stdio::piped());
+    command_builder.stderr(Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    {
+        command_builder.creation_flags(0x08000000);
+    }
+
+    let mut child = command_builder.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            format!(
+                "Executable '{}' could not be resolved by your OS environment. Current Tauri PATH search scope: {:?}", 
+                cmd, 
+                std::env::var("PATH").unwrap_or_default()
+            )
+        } else {
+            format!("Process execution runtime block failure: {}", e)
+        }
+    })?;
 
     let mut stdin = child.stdin.take().ok_or("Failed to seize stdin handle")?;
     let stdout = child.stdout.take().ok_or("Failed to seize stdout handle")?;

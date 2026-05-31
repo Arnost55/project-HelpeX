@@ -4,7 +4,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::Child;
+use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 
@@ -137,23 +137,28 @@ pub async fn mcp_spawn_and_initialize(
     let resolved_cmd = resolve_executable_path(&cmd);
     println!("🔍 [Tauri Path Resolver] Resolved raw token '{}' to absolute target path: '{}'", cmd, resolved_cmd);
 
-    let mut child = tokio::process::Command::new(&resolved_cmd)
-        .args(&args)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                format!(
-                    "Executable '{}' could not be resolved by your OS environment. Current Tauri PATH search scope: {:?}", 
-                    cmd, 
-                    std::env::var("PATH").unwrap_or_default()
-                )
-            } else {
-                format!("Process execution runtime block failure: {}", e)
-            }
-        })?;
+    let mut command_builder = Command::new(&resolved_cmd);
+    command_builder.args(&args);
+    command_builder.stdin(std::process::Stdio::piped());
+    command_builder.stdout(std::process::Stdio::piped());
+    command_builder.stderr(std::process::Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    {
+        command_builder.creation_flags(0x08000000);
+    }
+
+    let mut child = command_builder.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            format!(
+                "Executable '{}' could not be resolved by your OS environment. Current Tauri PATH search scope: {:?}", 
+                cmd, 
+                std::env::var("PATH").unwrap_or_default()
+            )
+        } else {
+            format!("Process execution runtime block failure: {}", e)
+        }
+    })?;
 
     let mut stdin = child.stdin.take().ok_or("Failed to seize child stdin channel handle")?;
     let stdout = child.stdout.take().ok_or("Failed to seize child stdout channel handle")?;

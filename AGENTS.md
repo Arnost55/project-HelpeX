@@ -116,3 +116,19 @@ This dual-output setup means the .dll files are available for:
 - Dynamic loading (plugin system via `libloading`)
 - External scripts that want to call into the core logic
 - Debugging / profiling the core libraries in isolation
+
+## 5. Commit & Push After Every Change
+
+**After completing any code change, always commit and push immediately.**
+
+1. Stage only the files YOU changed (check `git status`)
+2. Write a concise commit message describing exactly what was done
+3. Push to the remote
+
+```bash
+git add <files>
+git commit -m "description of change"
+git push
+```
+
+Do NOT batch multiple changes into one commit — each task gets its own commit.

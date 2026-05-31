@@ -56,6 +56,70 @@ pub struct McpSystemState {
     pub servers: Arc<Mutex<HashMap<String, ActiveServer>>>,
 }
 
+pub fn resolve_executable_path(cmd: &str) -> String {
+    let target = cmd.trim();
+
+    if target.contains('/') || target.contains('\\') {
+        return target.to_string();
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let app_data = std::env::var("APPDATA").unwrap_or_default();
+        let local_app_data = std::env::var("LOCALAPPDATA").unwrap_or_default();
+        let program_files = std::env::var("ProgramFiles").unwrap_or_default();
+
+        match target {
+            "npx" | "npm" | "node" => {
+                let paths = vec![
+                    format!(r"{}\nodejs\{}.cmd", program_files, target),
+                    format!(r"{}\npm\{}.cmd", app_data, target),
+                    format!(r"{}\volta\{}.cmd", app_data, target),
+                    format!(r"{}\fnm\{}.exe", local_app_data, target),
+                ];
+                for p in paths {
+                    if std::path::Path::new(&p).exists() { return p; }
+                }
+            }
+            "uvx" | "uv" => {
+                let p = format!(r"{}\Programs\uv\{}.exe", local_app_data, target);
+                if std::path::Path::new(&p).exists() { return p; }
+            }
+            _ => {}
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        match target {
+            "npx" | "npm" | "node" => {
+                let paths = vec![
+                    format!("/usr/local/bin/{}", target),
+                    format!("/usr/bin/{}", target),
+                    format!("{}/.nvm/versions/node/current/bin/{}", home, target),
+                    format!("{}/.local/share/fnm/bin/{}", home, target),
+                ];
+                for p in paths {
+                    if std::path::Path::new(&p).exists() { return p; }
+                }
+            }
+            "uvx" | "uv" => {
+                let paths = vec![
+                    format!("{}/.local/bin/{}", home, target),
+                    format!("/usr/local/bin/{}", target),
+                ];
+                for p in paths {
+                    if std::path::Path::new(&p).exists() { return p; }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    target.to_string()
+}
+
 #[tauri::command]
 pub async fn mcp_spawn_and_initialize(
     app_handle: AppHandle,
@@ -67,13 +131,26 @@ pub async fn mcp_spawn_and_initialize(
 
     let state = app_handle.state::<McpSystemState>();
 
-    let mut child = tokio::process::Command::new(&cmd)
+    let resolved_cmd = resolve_executable_path(&cmd);
+    println!("🔍 [Tauri Path Resolver] Resolved raw token '{}' to absolute target path: '{}'", cmd, resolved_cmd);
+
+    let mut child = tokio::process::Command::new(&resolved_cmd)
         .args(&args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Process spawning initiation failure: {}", e))?;
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                format!(
+                    "Executable '{}' could not be resolved by your OS environment. Current Tauri PATH search scope: {:?}", 
+                    cmd, 
+                    std::env::var("PATH").unwrap_or_default()
+                )
+            } else {
+                format!("Process execution runtime block failure: {}", e)
+            }
+        })?;
 
     let mut stdin = child.stdin.take().ok_or("Failed to seize child stdin channel handle")?;
     let stdout = child.stdout.take().ok_or("Failed to seize child stdout channel handle")?;

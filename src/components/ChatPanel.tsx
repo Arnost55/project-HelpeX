@@ -14,6 +14,9 @@ import { estimateConversationTokens } from "../utils/tokens";
 import { validateProviderSettings } from "../utils/providerValidation";
 import { ACTION_TEMPLATES } from "../utils/promptTemplates";
 import type { ActionType } from "../utils/promptTemplates";
+import { useMcp } from "../hooks/useMcp";
+import { transformMcpTools, parseProviderToolCalls } from "../utils/llmProviders";
+import type { LlmProvider } from "../utils/llmProviders";
 import { Square, Wifi, WifiOff, Layers, Cpu, Hash, AlertTriangle, Eye, EyeOff, Trash2, MessageSquarePlus } from "lucide-react";
 
 interface StreamChunkEvent {
@@ -77,6 +80,7 @@ export default function ChatPanel(props: { onNavigate?: (tab: "chat" | "settings
   const [activeStreamProvider, setActiveStreamProvider] = useState<string | null>(null);
   const [activeFallbackUsed, setActiveFallbackUsed] = useState(false);
   const [loadingAction, setLoadingAction] = useState<ActionType | null>(null);
+  const { activeServers, executeTool } = useMcp();
 
   const activeConversation = useMemo(() => {
     if (activeConversationId) {
@@ -219,6 +223,134 @@ export default function ChatPanel(props: { onNavigate?: (tab: "chat" | "settings
     setIncognitoConfirmOpen(false);
     setError(null);
     setSessionKey((n) => n + 1);
+  }
+
+  async function handleMCPChat(text: string): Promise<void> {
+    if (!activeConversation) return;
+    if (!useChatStore.getState().activeConversationId) return;
+
+    const mcpProvider: LlmProvider =
+      provider === "claude" ? "claude"
+      : provider === "ollama" ? "ollama"
+      : "openai";
+
+    const activeToolsCount = Object.values(activeServers).flat().length;
+    if (activeToolsCount === 0) {
+      return handleSend(text);
+    }
+
+    const formattedTools = transformMcpTools(activeServers, mcpProvider);
+
+    if (formattedTools.length === 0) {
+      console.warn("⚠️ [JARVIS Core] No active MCP tools found in state. AI will default to text-only mode.");
+    }
+
+    const jarvisSystemCore = {
+      role: "system",
+      content: `You are JARVIS, an advanced, elite desktop engineering assistant running locally on the user's machine.
+CRITICAL MANDATE: You possess real-time hardware capabilities via the Model Context Protocol (MCP). 
+Do NOT claim you lack file system or local workspace access. Use your available tools to fulfill user requests automatically. Proceed with absolute technical authority.`
+    };
+
+    const localizedMessages = [
+      jarvisSystemCore,
+      ...activeConversation.messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
+      { role: "user", content: text }
+    ];
+
+    let endpointUrl = "http://localhost:11434/v1/chat/completions";
+    let headers: Record<string, string> = { "Content-Type": "application/json" };
+    let payload: any = {};
+
+    if (mcpProvider === "openai") {
+      endpointUrl = "https://api.openai.com/v1/chat/completions";
+      headers["Authorization"] = `Bearer ${apiKey.trim()}`;
+      payload = {
+        model,
+        messages: localizedMessages,
+        tools: formattedTools.length > 0 ? formattedTools : undefined,
+      };
+    } else if (mcpProvider === "claude") {
+      endpointUrl = "https://api.anthropic.com/v1/messages";
+      headers["x-api-key"] = claudeApiKey.trim();
+      headers["anthropic-version"] = "2023-06-01";
+      payload = {
+        model,
+        max_tokens: maxTokens,
+        messages: localizedMessages,
+        tools: formattedTools.length > 0 ? formattedTools : undefined,
+      };
+    } else if (mcpProvider === "ollama") {
+      endpointUrl = "http://localhost:11434/v1/chat/completions";
+      payload = {
+        model,
+        messages: localizedMessages,
+        tools: formattedTools.length > 0 ? formattedTools : undefined,
+        stream: false,
+      };
+    }
+
+    console.log("🚀 [Engine Outbound] Dispatched payload via OpenAI compatibility format:", JSON.stringify(payload, null, 2));
+
+    setError(null);
+    addMessage(activeConversation.id, {
+      id: createId("msg"),
+      role: "user",
+      content: text,
+      createdAt: new Date().toISOString(),
+      conversationId: activeConversation.id,
+    });
+
+    startStreaming();
+
+    try {
+      console.log(`[MCP Chat] Sending to ${mcpProvider} with ${Object.keys(activeServers).length} tool servers`);
+      const response = await fetch(endpointUrl, { method: "POST", headers, body: JSON.stringify(payload) });
+      if (!response.ok) {
+        const errText = await response.text().catch(() => "Unknown error");
+        throw new Error(`Provider returned ${response.status}: ${errText}`);
+      }
+
+      const data = await response.json();
+      const toolCalls = parseProviderToolCalls(data, mcpProvider);
+
+      if (toolCalls.length > 0) {
+        console.log(`[MCP Chat] Executing ${toolCalls.length} tool calls from AI...`);
+        for (const call of toolCalls) {
+          const result = await executeTool(call.serverName, call.toolName, call.arguments);
+          console.log(`[MCP Chat] Tool ${call.serverName}__${call.toolName} result:`, result);
+          addMessage(activeConversation.id, {
+            id: createId("msg"),
+            role: "assistant" as const,
+            content: `[Tool call: ${call.toolName} from ${call.serverName}]\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``,
+            createdAt: new Date().toISOString(),
+            conversationId: activeConversation.id,
+          });
+        }
+      } else {
+        const finalText = mcpProvider === "claude"
+          ? data.content?.[0]?.text ?? JSON.stringify(data)
+          : data.choices?.[0]?.message?.content ?? JSON.stringify(data);
+        addMessage(activeConversation.id, {
+          id: createId("msg"),
+          role: "assistant",
+          content: finalText,
+          createdAt: new Date().toISOString(),
+          conversationId: activeConversation.id,
+        });
+      }
+
+      markProviderSuccess(provider, false);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "MCP chat failed";
+      setError(message);
+      markProviderFailure(provider);
+    } finally {
+      stopStreaming();
+    }
   }
 
   async function handleSend(text: string, systemPromptOverride?: string): Promise<void> {
@@ -563,12 +695,12 @@ export default function ChatPanel(props: { onNavigate?: (tab: "chat" | "settings
       {activeConversation && activeConversation.messages.length > 0 ? (
         <>
           <MessageList messages={activeConversation.messages} isStreaming={isStreaming} />
-          <MessageInput disabled={isStreaming} onSubmit={handleSend} />
+          <MessageInput disabled={isStreaming} onSubmit={Object.keys(activeServers).length > 0 ? handleMCPChat : handleSend} />
         </>
       ) : (
         <>
           <QuickActionGrid onSendPrompt={handleQuickAction} loadingAction={loadingAction} />
-          <MessageInput disabled={isStreaming} onSubmit={(t) => handleSend(t)} />
+          <MessageInput disabled={isStreaming} onSubmit={Object.keys(activeServers).length > 0 ? handleMCPChat : (t) => handleSend(t)} />
         </>
       )}
 

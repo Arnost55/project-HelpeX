@@ -200,3 +200,17 @@ pub fn list_messages(app_data_dir: &PathBuf, conversation_id: String) -> Result<
     }
     Ok(out)
 }
+
+
+
+pub fn reset_database(app_data_dir: &PathBuf) -> Result<(), AppError> {
+    let db_path = get_db_path(app_data_dir)?;
+    let cfg = app_data_dir.join("config.json");
+    if cfg.exists() {
+        fs::remove_file(cfg).map_err(|err| AppError::Config(err.to_string()))?;
+    }
+    if db_path.exists() {
+        fs::remove_file(db_path).map_err(|err| AppError::Database(err.to_string()))?;
+    }
+    Ok(())
+}

@@ -18,7 +18,7 @@ export default function Sidebar(props: {
       a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0
     );
   }, [conversations]);
-
+  
   return (
     <div className="flex flex-col p-4 gap-2 h-full justify-between">
       <div className="flex flex-col gap-2">

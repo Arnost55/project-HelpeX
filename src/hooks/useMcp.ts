@@ -50,6 +50,17 @@ export const useMcp = () => {
         }
     };
 
+    const executeTool = async (serverName: string, toolName: string, args: any): Promise<any> => {
+        try {
+            console.log(`⚡ [MCP Hook] Executing ${serverName}__${toolName} with args:`, args);
+            return await invoke("mcp_execute_tool", { serverName, toolName, arguments: args });
+        } catch (err: unknown) {
+            const parsedError = typeof err === "string" ? err : (err as Error)?.message || JSON.stringify(err);
+            console.error(`❌ [MCP Hook] Tool execution failed for ${serverName}__${toolName}: ${parsedError}`);
+            throw err;
+        }
+    };
+
     const removeNode = async (name: string) => {
         try {
             console.log(`🔌 [MCP Hook] Requesting backend termination for node: ${name}`);
@@ -80,6 +91,7 @@ export const useMcp = () => {
         error,
         registerNewNode,
         removeNode,
-        refreshActiveTools
+        refreshActiveTools,
+        executeTool
     };
 };

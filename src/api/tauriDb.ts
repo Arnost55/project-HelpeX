@@ -70,3 +70,8 @@ export function mapMessageFromDb(input: {
     createdAt: input.created_at
   };
 }
+
+
+export function resetDatabase(): Promise<void> {
+  return invoke("reset_database");
+}

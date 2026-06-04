@@ -1,17 +1,22 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { useSettingsStore } from "../store/settingsStore";
 import { checkProviderHealth, listProviderModels } from "../api/providers";
 import { getAvailableThemes, type ThemeDefinition } from "../api/settingsApi";
 import { useDebouncedSave } from "../hooks/useDebouncedSave";
 import { McpControlCenter } from "./McpControlCenter";
 import { CyberInput, CyberSelect, CyberToggle, CyberSlider } from "./ui";
+import { restartApplication } from "../utils/basicFunc";
 import {
   Brain, Cpu, Thermometer, Layers, Palette, Monitor, Type, Code, PlugZap,
   Eye, EyeOff, RefreshCw, CheckCircle2, Gauge,
   Sliders, Key, Globe, Command, Minimize2, Bell,
+  MessageSquareWarning,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { TauriEvent } from "@tauri-apps/api/event";
+import { app } from "@tauri-apps/api";
+import { resetDatabase } from "../api/tauriDb";
 
 type Provider = "openai" | "claude" | "ollama" | "groq" | "together";
 type SettingsTab = "ai" | "integration" | "appearance" | "system";
@@ -199,6 +204,18 @@ export default function SettingsPanel(props: {
     setAvailableModels([]);
     setHealthStatus(null);
   }
+
+
+function ResetButton() {
+  if (window.confirm("Are you sure you want to reset to factory settings? This action cannot be undone.")) {
+    invoke("reset_database").then(() => {
+    restartApplication();
+    }
+  )
+ }
+}
+
+
 
   function maskKey(key: string): string {
     if (!key) return "Not configured";
@@ -448,6 +465,8 @@ export default function SettingsPanel(props: {
           </div>
         </>
       )}
+
+
 
       {props.activeTab === "integration" && (
         <>
@@ -723,6 +742,26 @@ export default function SettingsPanel(props: {
                 </p>
               </div>
               <CyberToggle defaultChecked />
+            </div>
+          </div>
+          <div className="cyber-card">
+            <SectionHeader icon={MessageSquareWarning} title="Destructive Actions" />
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs" style={{ color: "var(--text-primary)" }}>
+                  Reset to factory settings
+                </p>
+                <p className="text-micro" style={{ color: "var(--text-muted)" }}>
+                  Clear all data and preferences
+                </p>
+              </div>
+              <button
+                className="cyber-btn bg-transparent border border-red-500 text-red-500 hover:bg-red-500 hover:text-white"
+                id="rst-btn"
+                onClick={() => ResetButton()}
+              >
+              Reset
+              </button>            
             </div>
           </div>
         </>

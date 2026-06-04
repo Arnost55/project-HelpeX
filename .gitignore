@@ -10,3 +10,5 @@ JARVIS_AI_COMPREHENSIVE_PLAN.md
 .cargo/
 ECC-fix/
 patches/
+auto-typer.vbs
+test.rs

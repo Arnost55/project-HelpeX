@@ -353,8 +353,6 @@ body {
 .message-input {
   border-top: 1px solid var(--border-panel);
   padding: 14px;
-  display: flex;
-  flex-direction: column;
   gap: 8px;
 }
 
@@ -374,7 +372,7 @@ body {
   align-self: flex-end;
   border: 0;
   background: var(--accent-glow);
-  color: white;
+  color: rgb(0, 0, 0);
   border-radius: 10px;
   padding: 10px 14px;
   cursor: pointer;
@@ -382,6 +380,8 @@ body {
 
 .message-input button:hover {
   background: var(--accent-strong);
+  color: black;
+
 }
 
 .message-input button:disabled {

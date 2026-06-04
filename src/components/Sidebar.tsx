@@ -3,10 +3,11 @@ import { Settings, Bot } from "lucide-react";
 import { useChatStore } from "../store/chatStore";
 
 export default function Sidebar(props: {
-  activeTab: "chat" | "settings";
-  onSelectTab: (tab: "chat" | "settings") => void;
+  activeTab: "chat" | "settings" | "user-profile";
+  onSelectTab: (tab: "chat" | "settings" | "user-profile") => void;
   isSettingsModalOpen: boolean;
   onToggleSettings: () => void;
+  onToggleUserProfile: () => void;
 }): JSX.Element {
   const conversations = useChatStore((state) => state.conversations);
   const activeConversationId = useChatStore((state) => state.activeConversationId);
@@ -65,15 +66,16 @@ export default function Sidebar(props: {
         className="flex items-center gap-3 px-3 py-2.5 rounded-full"
         style={{ backgroundColor: '#D9D9D9' }}
       >
-        <div
+        <button
           className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden"
           style={{ backgroundColor: '#D9D9D9' }}
+          onClick={props.onToggleUserProfile}
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <circle cx="12" cy="8" r="3.5" stroke="#1E1E1E" strokeWidth="1.5" strokeLinecap="round"/>
             <path d="M4 20c0-3.5 3.5-6 8-6s8 2.5 8 6" stroke="#1E1E1E" strokeWidth="1.5" strokeLinecap="round"/>
           </svg>
-        </div>
+        </button>
         <span className="flex-1 text-sm font-normal truncate" style={{ color: '#1E1E1E', fontFamily: 'Inter, -apple-system, Roboto, Helvetica, sans-serif' }}>
           John Doe
         </span>

@@ -3,6 +3,7 @@ import Sidebar from "./components/Sidebar";
 import ChatPanel from "./components/ChatPanel";
 import SettingsPanel from "./components/SettingsPanel";
 import { SettingsModal } from "./components/SettingsModal";
+import UserProfilePanel from "./components/UserProfilePanel";
 import { useChatStore } from "./store/chatStore";
 import { useSettingsStore } from "./store/settingsStore";
 import { listConversations, listMessages, mapConversationFromDb, mapMessageFromDb } from "./api/tauriDb";
@@ -12,7 +13,7 @@ export default function App(): JSX.Element {
   const setConversations = useChatStore((state) => state.setConversations);
   const theme = useSettingsStore((state) => state.theme);
   const setTheme = useSettingsStore((state) => state.setTheme);
-  const [activeTab, setActiveTab] = useState<"chat" | "settings">("chat");
+  const [activeTab, setActiveTab] = useState<"chat" | "settings" | "user-profile">("chat");
   const [settingsTab, setSettingsTab] = useState<"ai" | "integration" | "appearance" | "system">("ai");
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
@@ -84,11 +85,16 @@ export default function App(): JSX.Element {
           onSelectTab={setActiveTab}
           isSettingsModalOpen={isSettingsModalOpen}
           onToggleSettings={() => setIsSettingsModalOpen((prev) => !prev)}
+          onToggleUserProfile={() => setActiveTab("user-profile")}
         />
       </aside>
 
       <main className="flex-1 h-full flex flex-col min-w-0" style={{ backgroundColor: 'var(--bg-main)' }}>
-        <ChatPanel onNavigate={(tab) => setActiveTab(tab)} />
+        {activeTab === "user-profile" ? (
+          <UserProfilePanel onBack={() => setActiveTab("chat")} />
+        ) : (
+          <ChatPanel onNavigate={(tab) => setActiveTab(tab)} />
+        )}
       </main>
 
       {isSettingsModalOpen && (

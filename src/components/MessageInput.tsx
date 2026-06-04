@@ -1,5 +1,6 @@
 import { FormEvent, useState } from "react";
 import { SendHorizonal, Loader2 } from "lucide-react";
+import { useSettingsStore } from "../store/settingsStore";
 
 export default function MessageInput(props: {
   disabled: boolean;
@@ -24,7 +25,7 @@ export default function MessageInput(props: {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="message-input px-6 py-4 flex-shrink-0" style={{ backgroundColor: '#121212' }}>
+    <form onSubmit={handleSubmit}>
       <div className="flex items-end gap-3 max-w-2xl mx-auto">
         <button
           type="button"
@@ -67,8 +68,7 @@ export default function MessageInput(props: {
               e.currentTarget.style.borderColor = '#D9D9D9';
             }}
           />
-          <button
-            type="button"
+          <label
             className="flex items-center justify-center gap-2 px-4 py-2 rounded-full text-xs font-medium flex-shrink-0"
             style={{
               backgroundColor: 'rgba(255, 255, 255, 0.08)',
@@ -77,12 +77,28 @@ export default function MessageInput(props: {
               fontFamily: 'Roboto, -apple-system, Roboto, Helvetica, sans-serif',
             }}
             title="Model selector"
+            htmlFor="model-select"
           >
-            <span style={{ fontSize: '14px', fontWeight: 500 }}>Qwen 3.6</span>
+            <span style={{ fontSize: '14px', fontWeight: 500 }}>{useSettingsStore((s) => s.model)}</span>
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M4 5.5L7 8.5L10 5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
-          </button>
+          </label>
+          <select
+            id="model-select"
+            value={useSettingsStore((s) => s.model)}
+            onChange={(e) => useSettingsStore.getState().setModel(e.target.value)}
+            disabled={props.disabled || isSubmitting}
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          >
+            <option value="gpt-4o-mini">GPT-4o-mini</option>
+            <option value="gpt-4o">GPT-4o</option>
+            <option value="gpt-3.5-turbo">GPT-3.5-turbo</option>
+            <option value="claude-2">Claude 2</option>
+            <option value="claude-instant-100k">Claude Instant 100k</option>
+            <option value="groq-1">Groq 1</option>
+            <option value="together-1">Together 1</option>
+          </select>
         </div>
         <button
           type="submit"
@@ -94,7 +110,7 @@ export default function MessageInput(props: {
             borderRadius: '8px',
             backgroundColor: '#D9D9D9',
             border: '1px solid #B3B3B3',
-            color: '#B3B3B3',
+            color: '#000000',
             cursor: props.disabled || isSubmitting || text.trim().length === 0 ? 'not-allowed' : 'pointer',
             opacity: props.disabled || isSubmitting || text.trim().length === 0 ? 0.6 : 1,
           }}

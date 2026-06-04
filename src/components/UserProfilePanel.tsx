@@ -48,6 +48,34 @@ export default function UserProfilePanel(props: { onBack: () => void }): JSX.Ele
                     </p>
                 </div>
                 <div>
+                    <textarea
+                        className="w-full rounded-md p-3 text-sm resize-none outline-none"
+                        style={{
+                            backgroundColor: 'var(--bg-panel)',
+                            border: '1px solid var(--border-panel)',
+                            color: 'var(--text-primary)',
+                            fontFamily: 'Inter, -apple-system, Roboto, Helvetica, sans-serif',
+                        }}
+                        inputMode="text"
+                        placeholder="Write your First Name here..."
+
+                    />
+                    First Name
+                    <textarea
+                        className="w-full rounded-md p-3 text-sm resize-none outline-none mt-2"
+                        style={{
+                            backgroundColor: 'var(--bg-panel)',
+                            border: '1px solid var(--border-panel)',
+                            color: 'var(--text-primary)',
+                            fontFamily: 'Inter, -apple-system, Roboto, Helvetica, sans-serif',
+                        }}
+                        inputMode="text"
+                        placeholder="Write your Last Name here..."
+                    />
+                    Last Name
+                        
+                </div>
+                <div>
                     <h3 className="text-md font-medium" style={{ color: "var(--text-primary)" }}>
                         Preferences
                     </h3>

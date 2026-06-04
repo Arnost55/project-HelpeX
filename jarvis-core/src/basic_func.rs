@@ -26,3 +26,8 @@ pub fn app_restart() {
             .expect("Failed to restart application");
     }
 }
+pub fn app_exit() {
+    std::process::exit(0);
+}
+
+

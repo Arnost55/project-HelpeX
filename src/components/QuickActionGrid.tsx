@@ -11,30 +11,34 @@ export default function QuickActionGrid(_props: {
   onSendPrompt: (actionType: ActionType, prompt: string) => void;
   loadingAction: ActionType | null;
 }): JSX.Element {
-
   return (
     <div className="flex flex-col items-center justify-center h-full px-8">
       <div className="text-center">
         <h1
-          className="font-bold leading-tight tracking-tight mb-6"
           style={{
             color: '#E0E0E0',
-            fontSize: 'clamp(2rem, 5vw, 3.75rem)',
-            letterSpacing: '-0.03em',
+            fontSize: '60px',
+            fontWeight: 700,
+            fontFamily: 'Inter, -apple-system, Roboto, Helvetica, sans-serif',
+            lineHeight: '72px',
+            letterSpacing: '-1.8px',
+            marginBottom: '24px',
           }}
         >
-          {getGreeting()}, Commander
+          {getGreeting()}, John
         </h1>
         <p
-          className="font-normal leading-relaxed"
           style={{
             color: '#E0E0E0',
-            fontSize: 'clamp(1.25rem, 2.5vw, 2.5rem)',
-            letterSpacing: '-0.03em',
+            fontSize: '40px',
+            fontWeight: 400,
+            fontFamily: 'Inter, -apple-system, Roboto, Helvetica, sans-serif',
+            lineHeight: '62px',
+            letterSpacing: '-1.2px',
+            margin: 0,
           }}
         >
-          Where should we start?
-          <br />
+          Where should we start?<br />
           Perhaps somewhere here.
         </p>
       </div>

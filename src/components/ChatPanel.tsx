@@ -3,17 +3,13 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import MessageList from "./MessageList";
 import MessageInput from "./MessageInput";
-import QuickActionGrid from "./QuickActionGrid";
 import { useChatStore } from "../store/chatStore";
 import { useSettingsStore } from "../store/settingsStore";
 import { useIncognitoStore } from "../store/incognitoStore";
 import { createId } from "../utils/id";
 import { saveConversation, saveMessage } from "../api/tauriDb";
-import { runJarvisTask } from "../api/settingsApi";
 import { estimateConversationTokens } from "../utils/tokens";
 import { validateProviderSettings } from "../utils/providerValidation";
-import { ACTION_TEMPLATES } from "../utils/promptTemplates";
-import type { ActionType } from "../utils/promptTemplates";
 import { useMcp } from "../hooks/useMcp";
 import { transformMcpTools, parseProviderToolCalls } from "../utils/llmProviders";
 import type { LlmProvider } from "../utils/llmProviders";
@@ -79,7 +75,6 @@ export default function ChatPanel(props: { onNavigate?: (tab: "chat" | "settings
   const [activeStreamId, setActiveStreamId] = useState<string | null>(null);
   const [activeStreamProvider, setActiveStreamProvider] = useState<string | null>(null);
   const [activeFallbackUsed, setActiveFallbackUsed] = useState(false);
-  const [loadingAction, setLoadingAction] = useState<ActionType | null>(null);
   const { activeServers, executeTool } = useMcp();
 
   const activeConversation = useMemo(() => {
@@ -121,63 +116,6 @@ export default function ChatPanel(props: { onNavigate?: (tab: "chat" | "settings
       }
     };
   }, [activeStreamId]);
-
-  async function handleQuickAction(actionType: ActionType, text: string): Promise<void> {
-    setLoadingAction(actionType);
-    try {
-      const template = ACTION_TEMPLATES[actionType];
-      if (!activeConversation) return;
-      if (!useChatStore.getState().activeConversationId) return;
-
-      const resolvedApiKey =
-        provider === "openai" ? apiKey.trim()
-        : provider === "claude" ? claudeApiKey.trim()
-        : provider === "groq" ? groqApiKey.trim()
-        : provider === "together" ? togetherApiKey.trim()
-        : undefined;
-
-      const resolvedBaseUrl =
-        provider === "ollama" ? ollamaBaseUrl.trim()
-        : provider === "groq" ? groqBaseUrl.trim()
-        : provider === "together" ? togetherBaseUrl.trim()
-        : undefined;
-
-      addMessage(activeConversation.id, {
-        id: createId("msg"),
-        role: "user",
-        content: text,
-        createdAt: new Date().toISOString(),
-        conversationId: activeConversation.id,
-      });
-
-      const response = await runJarvisTask({
-        taskType: actionType,
-        text,
-        provider,
-        model,
-        apiKey: resolvedApiKey,
-        baseUrl: resolvedBaseUrl,
-        temperature,
-        maxTokens,
-      });
-
-      addMessage(activeConversation.id, {
-        id: createId("msg"),
-        role: "assistant",
-        content: response,
-        createdAt: new Date().toISOString(),
-        conversationId: activeConversation.id,
-      });
-
-      markProviderSuccess(provider, false);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Quick action failed";
-      setError(message);
-      markProviderFailure(provider);
-    } finally {
-      setLoadingAction(null);
-    }
-  }
 
   const toggleLocked = activeConversation ? activeConversation.messages.length > 0 : false;
 
@@ -691,7 +629,7 @@ Do NOT claim you lack file system or local workspace access. Use your available 
         </div>
       ) : null}
 
-      {/* Messages or Quick Actions */}
+      {/* Messages */}
       {activeConversation && activeConversation.messages.length > 0 ? (
         <>
           <MessageList messages={activeConversation.messages} isStreaming={isStreaming} />
@@ -699,7 +637,6 @@ Do NOT claim you lack file system or local workspace access. Use your available 
         </>
       ) : (
         <>
-          <QuickActionGrid onSendPrompt={handleQuickAction} loadingAction={loadingAction} />
           <MessageInput disabled={isStreaming} onSubmit={Object.keys(activeServers).length > 0 ? handleMCPChat : (t) => handleSend(t)} />
         </>
       )}

@@ -24,8 +24,8 @@ export default function MessageInput(props: {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="message-input px-8 pb-8">
-      <div className="flex items-end gap-3 max-w-4xl mx-auto">
+    <form onSubmit={handleSubmit} className="message-input px-6 py-4 flex-shrink-0" style={{ backgroundColor: '#121212' }}>
+      <div className="flex items-end gap-3 max-w-2xl mx-auto">
         <button
           type="button"
           className="flex items-center justify-center flex-shrink-0"

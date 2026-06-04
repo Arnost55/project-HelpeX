@@ -12,36 +12,36 @@ export default function QuickActionGrid(_props: {
   loadingAction: ActionType | null;
 }): JSX.Element {
   return (
-    <div className="flex flex-col items-center justify-center h-full px-8">
-      <div className="text-center">
-        <h1
-          style={{
-            color: '#E0E0E0',
-            fontSize: '60px',
-            fontWeight: 700,
-            fontFamily: 'Inter, -apple-system, Roboto, Helvetica, sans-serif',
-            lineHeight: '72px',
-            letterSpacing: '-1.8px',
-            marginBottom: '24px',
-          }}
-        >
-          {getGreeting()}, John
-        </h1>
-        <p
-          style={{
-            color: '#E0E0E0',
-            fontSize: '40px',
-            fontWeight: 400,
-            fontFamily: 'Inter, -apple-system, Roboto, Helvetica, sans-serif',
-            lineHeight: '62px',
-            letterSpacing: '-1.2px',
-            margin: 0,
-          }}
-        >
-          Where should we start?<br />
-          Perhaps somewhere here.
-        </p>
-      </div>
+    <div className="flex flex-col items-center justify-center flex-1">
+      <h1
+        style={{
+          color: '#E0E0E0',
+          fontSize: '60px',
+          fontWeight: 700,
+          fontFamily: 'Inter, -apple-system, Roboto, Helvetica, sans-serif',
+          lineHeight: '72px',
+          letterSpacing: '-1.8px',
+          marginBottom: '24px',
+          textAlign: 'center',
+        }}
+      >
+        {getGreeting()}, John
+      </h1>
+      <p
+        style={{
+          color: '#E0E0E0',
+          fontSize: '40px',
+          fontWeight: 400,
+          fontFamily: 'Inter, -apple-system, Roboto, Helvetica, sans-serif',
+          lineHeight: '62px',
+          letterSpacing: '-1.2px',
+          margin: 0,
+          textAlign: 'center',
+        }}
+      >
+        Where should we start?<br />
+        Perhaps somewhere here.
+      </p>
     </div>
   );
 }

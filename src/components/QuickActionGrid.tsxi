@@ -1,4 +1,3 @@
-import type { ActionType } from "../utils/promptTemplates";
 
 function getGreeting(): string {
   const hour = new Date().getHours();

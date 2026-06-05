@@ -18,6 +18,8 @@ interface ProviderHealthState {
   checkedAt: string;
 }
 
+
+
 interface SettingsState {
   theme: ThemeMode;
   provider: Provider;

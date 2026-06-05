@@ -8,6 +8,7 @@ import { useSettingsStore } from "../store/settingsStore";
 import { listConversations, listMessages, mapConversationFromDb, mapMessageFromDb } from "../api/tauriDb";
 import { invoke } from "@tauri-apps/api/core";
 
+
 export default function RootPage(): JSX.Element {
   const setConversations = useChatStore((state) => state.setConversations);
   const theme = useSettingsStore((state) => state.theme);

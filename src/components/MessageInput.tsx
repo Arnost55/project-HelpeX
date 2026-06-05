@@ -1,6 +1,7 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
-import { Loader2, SendHorizontal, ChevronDown } from "lucide-react";
+import { FormEvent, useEffect, useState } from "react";
+import { Loader2, SendHorizontal, ChevronDown, LucideCirclePlus } from "lucide-react";
 import { useSettingsStore } from "../store/settingsStore";
+import Dropdown from "./ui/Dropdown";
 
 type MessageInputProps = {
   disabled: boolean;
@@ -57,39 +58,11 @@ export default function MessageInput({ disabled, onSubmit }: MessageInputProps):
   const model = useSettingsStore((state) => state.model);
   const setProvider = useSettingsStore((state) => state.setProvider);
   const setModel = useSettingsStore((state) => state.setModel);
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [modelDraft, setModelDraft] = useState(model);
-  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    setModelDraft(model);
-  }, [model]);
+  useEffect(() => setModelDraft(model), [model]);
 
-  useEffect(() => {
-    if (!isDropdownOpen) return;
-
-    function handleOutsideClick(event: MouseEvent) {
-      if (!dropdownRef.current?.contains(event.target as Node)) {
-        setIsDropdownOpen(false);
-      }
-    }
-
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setIsDropdownOpen(false);
-      }
-    }
-
-    document.addEventListener("mousedown", handleOutsideClick);
-    window.addEventListener("keydown", handleEscape);
-
-    return () => {
-      document.removeEventListener("mousedown", handleOutsideClick);
-      window.removeEventListener("keydown", handleEscape);
-    };
-  }, [isDropdownOpen]);
-
-  function handleProviderSelect(nextProvider: Provider) {
+  function handleProviderSelect(nextProvider: Provider, close: () => void) {
     setProvider(nextProvider);
     const presets = MODEL_PRESETS[nextProvider];
 
@@ -98,7 +71,7 @@ export default function MessageInput({ disabled, onSubmit }: MessageInputProps):
       setModelDraft(presets[0]);
     }
 
-    setIsDropdownOpen(false);
+    close();
   }
 
   function handleApplyModel(event: FormEvent<HTMLFormElement>) {
@@ -106,7 +79,6 @@ export default function MessageInput({ disabled, onSubmit }: MessageInputProps):
     const value = modelDraft.trim();
     if (!value) return;
     setModel(value);
-    setIsDropdownOpen(false);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -173,127 +145,183 @@ export default function MessageInput({ disabled, onSubmit }: MessageInputProps):
             >
           
 
-          <div ref={dropdownRef} style={{ position: "relative" }}>
-          <button
-            type="button"
-            className="message-input-provider"
-            onClick={() => setIsDropdownOpen((prev) => !prev)}
-            aria-expanded={isDropdownOpen}
-            aria-haspopup="menu"
-            style={{
-              fontSize: "12px",
-              color: "#121212",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "4px",
-              border: "none",
-              background: "transparent",
-              cursor: "pointer",
-              padding: 0,
-            }}>
-            {provider} - {model} <span className="sr-only">Change provider and model</span>
-            <ChevronDown size={16} style={{ transform: isDropdownOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s ease" }} />
-            </button>
-            {isDropdownOpen && (
-              <div
-                role="menu"
-                className="message-input-provider-menu"
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  top: "calc(100% + 10px)",
-                  width: "280px",
-                  background: "#111",
-                  border: "1px solid rgba(255, 255, 255, 0.14)",
-                  borderRadius: "10px",
-                  padding: "8px",
-                  zIndex: 20,
-                  boxShadow: "0 12px 30px rgba(0, 0, 0, 0.4)",
-                }}
-              >
-                <div style={{ color: "rgba(255, 255, 255, 0.75)", fontSize: "11px", marginBottom: "6px" }}>Provider</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "10px" }}>
-                  {PROVIDER_OPTIONS.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => handleProviderSelect(option.value)}
-                      style={{
-                        border: "none",
-                        borderRadius: "6px",
-                        padding: "6px 8px",
-                        fontSize: "12px",
-                        textAlign: "left",
-                        cursor: "pointer",
-                        color: "white",
-                        background: option.value === provider ? "#5f03f4" : "rgba(255, 255, 255, 0.09)",
-                      }}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
+          <Dropdown>
+            {({ isOpen, toggle, close }) => (
+              <div style={{ position: "relative" }}>
+                <button
+                  type="button"
+                  className="message-input-provider"
+                  onClick={toggle}
+                  aria-expanded={isOpen}
+                  aria-haspopup="menu"
+                  style={{
+                    fontSize: "12px",
+                    color: "#121212",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    border: "none",
+                    background: "transparent",
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  {provider} - {model} <span className="sr-only">Change provider and model</span>
+                  <ChevronDown size={16} style={{ transform: isOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s ease" }} />
+                </button>
 
-                <form onSubmit={handleApplyModel}>
-                  <div style={{ color: "rgba(255, 255, 255, 0.75)", fontSize: "11px", marginBottom: "6px" }}>Model</div>
-                  <input
-                    value={modelDraft}
-                    onChange={(event) => setModelDraft(event.target.value)}
-                    placeholder="Model id"
+                {isOpen && (
+                  <div
+                    role="menu"
+                    className="message-input-provider-menu"
                     style={{
-                      width: "100%",
-                      border: "1px solid rgba(255, 255, 255, 0.2)",
-                      borderRadius: "6px",
-                      background: "rgba(255, 255, 255, 0.08)",
-                      color: "white",
-                      fontSize: "12px",
-                      padding: "6px 8px",
-                      marginBottom: "8px",
-                    }}
-                  />
-                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "8px" }}>
-                    {MODEL_PRESETS[provider].map((preset) => (
-                      <button
-                        key={preset}
-                        type="button"
-                        onClick={() => setModelDraft(preset)}
-                        style={{
-                          border: "none",
-                          borderRadius: "999px",
-                          padding: "4px 8px",
-                          fontSize: "11px",
-                          cursor: "pointer",
-                          color: "white",
-                          background: modelDraft === preset ? "#5f03f4" : "rgba(255, 255, 255, 0.12)",
-                        }}
-                      >
-                        {preset}
-                      </button>
-                    ))}
-                  </div>
-
-                  <button
-                    type="submit"
-                    style={{
-                      width: "100%",
-                      border: "none",
-                      borderRadius: "6px",
-                      padding: "7px 10px",
-                      fontSize: "12px",
-                      cursor: "pointer",
-                      color: "white",
-                      background: "#5f03f4",
+                      position: "absolute",
+                      left: 0,
+                      top: "calc(100% + 10px)",
+                      width: "280px",
+                      background: "#111",
+                      border: "1px solid rgba(255, 255, 255, 0.14)",
+                      borderRadius: "10px",
+                      padding: "8px",
+                      zIndex: 20,
+                      boxShadow: "0 12px 30px rgba(0, 0, 0, 0.4)",
                     }}
                   >
-                    Apply
-                  </button>
-                </form>
+                    <div style={{ color: "rgba(255, 255, 255, 0.75)", fontSize: "11px", marginBottom: "6px" }}>Provider</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "10px" }}>
+                      {PROVIDER_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => handleProviderSelect(option.value, close)}
+                          style={{
+                            border: "none",
+                            borderRadius: "6px",
+                            padding: "6px 8px",
+                            fontSize: "12px",
+                            textAlign: "left",
+                            cursor: "pointer",
+                            color: "white",
+                            background: option.value === provider ? "#5f03f4" : "rgba(255, 255, 255, 0.09)",
+                          }}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <form onSubmit={(e) => { handleApplyModel(e); close(); }}>
+                      <div style={{ color: "rgba(255, 255, 255, 0.75)", fontSize: "11px", marginBottom: "6px" }}>Model</div>
+                      <input
+                        value={modelDraft}
+                        onChange={(event) => setModelDraft(event.target.value)}
+                        placeholder="Model id"
+                        style={{
+                          width: "100%",
+                          border: "1px solid rgba(255, 255, 255, 0.2)",
+                          borderRadius: "6px",
+                          background: "rgba(255, 255, 255, 0.08)",
+                          color: "white",
+                          fontSize: "12px",
+                          padding: "6px 8px",
+                          marginBottom: "8px",
+                        }}
+                      />
+                      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "8px" }}>
+                        {MODEL_PRESETS[provider].map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => setModelDraft(preset)}
+                            style={{
+                              border: "none",
+                              borderRadius: "999px",
+                              padding: "4px 8px",
+                              fontSize: "11px",
+                              cursor: "pointer",
+                              color: "white",
+                              background: modelDraft === preset ? "#5f03f4" : "rgba(255, 255, 255, 0.12)",
+                            }}
+                          >
+                            {preset}
+                          </button>
+                        ))}
+                      </div>
+
+                      <button
+                        type="submit"
+                        style={{
+                          width: "100%",
+                          border: "none",
+                          borderRadius: "6px",
+                          padding: "7px 10px",
+                          fontSize: "12px",
+                          cursor: "pointer",
+                          color: "white",
+                          background: "#5f03f4",
+                        }}
+                      >
+                        Apply
+                      </button>
+                    </form>
+                  </div>
+                )}
               </div>
             )}
-          </div>
+          </Dropdown>
+          
+          <Dropdown>
+            {({ isOpen, toggle, close }) => (
+              <div style={{ position: "relative" }}>
+                <button
+                  type="button"
+                  className="message-input-add"
+                  onClick={toggle}
+                  aria-expanded={isOpen}
+                  aria-haspopup="menu"
+                  style={{
+                    fontSize: "12px",
+                    color: "#121212",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    border: "none",
+                    background: "transparent",
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  <LucideCirclePlus size={18} style={{ transform: isOpen ? "rotate(45deg)" : "rotate(0deg)", color: "rgba(255, 255, 255, 0.6)", cursor: "pointer" }} />
+                </button>
+
+                {isOpen && (
+                  <div
+                    role="menu"
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: "calc(100% + 8px)",
+                      width: "200px",
+                      background: "#111",
+                      border: "1px solid rgba(255, 255, 255, 0.12)",
+                      borderRadius: "8px",
+                      padding: "8px",
+                      zIndex: 20,
+                    }}
+                  >
+                    <button type="button" onClick={() => { /* placeholder action */ close(); }} style={{ width: "100%", padding: "6px", border: "none", borderRadius: "6px", background: "transparent", color: "white", textAlign: "left" }}>Quick action</button>
+                  </div>
+                )}
+
+              </div>
+            )}
+          </Dropdown>
           
 
 

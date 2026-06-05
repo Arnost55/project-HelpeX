@@ -1,5 +1,5 @@
-import { FormEvent, useState } from "react";
-import { Loader2, SendHorizontal } from "lucide-react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { Loader2, SendHorizontal, ChevronDown } from "lucide-react";
 import { useSettingsStore } from "../store/settingsStore";
 
 type MessageInputProps = {
@@ -7,10 +7,45 @@ type MessageInputProps = {
   onSubmit: (text: string) => Promise<void>;
 };
 
+type Provider = "openai" | "claude" | "ollama" | "groq" | "together";
+
+const PROVIDER_OPTIONS: { value: Provider; label: string }[] = [
+  { value: "openai", label: "OpenAI" },
+  { value: "claude", label: "Claude" },
+  { value: "ollama", label: "Ollama" },
+  { value: "groq", label: "Groq" },
+  { value: "together", label: "Together" }
+];
+
+const MODEL_PRESETS: Record<Provider, string[]> = {
+  openai: ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4.1"],
+  claude: ["claude-3-5-haiku-latest", "claude-3-5-sonnet-latest"],
+  ollama: ["llama3.2", "qwen2.5", "mistral"],
+  groq: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
+  together: ["meta-llama/Llama-3.1-8B-Instruct-Turbo", "Qwen/Qwen2.5-7B-Instruct-Turbo"]
+};
+
 function InlineText({ text }: { text: string }): JSX.Element {
   return (
-    <div className="msg-input-text">
-      <div className="msg-input-text-wrapper">{text}</div>
+    <div className="msg-input-text"
+      style={{
+        display: "inline-flex",
+        alignItems: "flex-start",
+      }}
+    >
+      <div className="msg-input-text-wrapper"
+      style={{
+        color: "#121212",
+        fontFamily: "Inter, Helvetica",
+        fontSize: "16px",
+        fontStyle: "normal",
+        fontWeight: 400,
+        letterSpacing: 0,
+        lineHeight: "139.9999976158142%",
+        whiteSpace: "nowrap",
+        width: "fit-content",
+
+      }}>{text}</div>
     </div>
   );
 }
@@ -20,6 +55,59 @@ export default function MessageInput({ disabled, onSubmit }: MessageInputProps):
   const [isSubmitting, setIsSubmitting] = useState(false);
   const provider = useSettingsStore((state) => state.provider);
   const model = useSettingsStore((state) => state.model);
+  const setProvider = useSettingsStore((state) => state.setProvider);
+  const setModel = useSettingsStore((state) => state.setModel);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [modelDraft, setModelDraft] = useState(model);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setModelDraft(model);
+  }, [model]);
+
+  useEffect(() => {
+    if (!isDropdownOpen) return;
+
+    function handleOutsideClick(event: MouseEvent) {
+      if (!dropdownRef.current?.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsDropdownOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleOutsideClick);
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [isDropdownOpen]);
+
+  function handleProviderSelect(nextProvider: Provider) {
+    setProvider(nextProvider);
+    const presets = MODEL_PRESETS[nextProvider];
+
+    if (!presets.includes(model)) {
+      setModel(presets[0]);
+      setModelDraft(presets[0]);
+    }
+
+    setIsDropdownOpen(false);
+  }
+
+  function handleApplyModel(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const value = modelDraft.trim();
+    if (!value) return;
+    setModel(value);
+    setIsDropdownOpen(false);
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -39,7 +127,17 @@ export default function MessageInput({ disabled, onSubmit }: MessageInputProps):
 
   return (
     <>
-      <form className="message-input-root" onSubmit={handleSubmit}>
+      <form className="message-input-root" onSubmit={handleSubmit}
+      style={{
+          border: "1px solid rgba(255, 255, 255, 0.9)",
+          borderRadius: "16px",
+          background: "#d9d9d9",
+          padding: "12px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "10px",
+      }}
+      >
         <InlineText text="Ask me anything!" />
 
         <textarea
@@ -47,18 +145,176 @@ export default function MessageInput({ disabled, onSubmit }: MessageInputProps):
           value={text}
           onChange={(event) => setText(event.target.value)}
           placeholder="Type your message..."
-          rows={2}
+          rows={1}
           disabled={isDisabled}
+          inputMode="text"
+          style={{
+            width: "100%",
+            resize: "none",
+            minHeight: "54px",
+            maxHeight: "180px",
+            border: "1px solid rgba(255, 255, 255, 0.14)",
+            borderRadius: "12px",
+            background: "#f5f5f5",
+            color: "#121212",
+            padding: "10px 12px",
+            fontSize: "14px",
+            lineHeight: "1.4",
+          }}
         />
 
-        <div className="message-input-actions">
-          <span className="message-input-provider">{provider} · {model}</span>
+        <div className="message-input-actions"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            position: "relative",
+            }}
+            >
+          
+
+          <div ref={dropdownRef} style={{ position: "relative" }}>
+          <button
+            type="button"
+            className="message-input-provider"
+            onClick={() => setIsDropdownOpen((prev) => !prev)}
+            aria-expanded={isDropdownOpen}
+            aria-haspopup="menu"
+            style={{
+              fontSize: "12px",
+              color: "#121212",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "4px",
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              padding: 0,
+            }}>
+            {provider} - {model} <span className="sr-only">Change provider and model</span>
+            <ChevronDown size={16} style={{ transform: isDropdownOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s ease" }} />
+            </button>
+            {isDropdownOpen && (
+              <div
+                role="menu"
+                className="message-input-provider-menu"
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  top: "calc(100% + 10px)",
+                  width: "280px",
+                  background: "#111",
+                  border: "1px solid rgba(255, 255, 255, 0.14)",
+                  borderRadius: "10px",
+                  padding: "8px",
+                  zIndex: 20,
+                  boxShadow: "0 12px 30px rgba(0, 0, 0, 0.4)",
+                }}
+              >
+                <div style={{ color: "rgba(255, 255, 255, 0.75)", fontSize: "11px", marginBottom: "6px" }}>Provider</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "10px" }}>
+                  {PROVIDER_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => handleProviderSelect(option.value)}
+                      style={{
+                        border: "none",
+                        borderRadius: "6px",
+                        padding: "6px 8px",
+                        fontSize: "12px",
+                        textAlign: "left",
+                        cursor: "pointer",
+                        color: "white",
+                        background: option.value === provider ? "#5f03f4" : "rgba(255, 255, 255, 0.09)",
+                      }}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+
+                <form onSubmit={handleApplyModel}>
+                  <div style={{ color: "rgba(255, 255, 255, 0.75)", fontSize: "11px", marginBottom: "6px" }}>Model</div>
+                  <input
+                    value={modelDraft}
+                    onChange={(event) => setModelDraft(event.target.value)}
+                    placeholder="Model id"
+                    style={{
+                      width: "100%",
+                      border: "1px solid rgba(255, 255, 255, 0.2)",
+                      borderRadius: "6px",
+                      background: "rgba(255, 255, 255, 0.08)",
+                      color: "white",
+                      fontSize: "12px",
+                      padding: "6px 8px",
+                      marginBottom: "8px",
+                    }}
+                  />
+                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "8px" }}>
+                    {MODEL_PRESETS[provider].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setModelDraft(preset)}
+                        style={{
+                          border: "none",
+                          borderRadius: "999px",
+                          padding: "4px 8px",
+                          fontSize: "11px",
+                          cursor: "pointer",
+                          color: "white",
+                          background: modelDraft === preset ? "#5f03f4" : "rgba(255, 255, 255, 0.12)",
+                        }}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    type="submit"
+                    style={{
+                      width: "100%",
+                      border: "none",
+                      borderRadius: "6px",
+                      padding: "7px 10px",
+                      fontSize: "12px",
+                      cursor: "pointer",
+                      color: "white",
+                      background: "#5f03f4",
+                    }}
+                  >
+                    Apply
+                  </button>
+                </form>
+              </div>
+            )}
+          </div>
+          
+
 
           <button
             type="submit"
             className="message-input-submit"
             disabled={isDisabled || !text.trim()}
             aria-label="Send message"
+            style={{
+              width: "40px",
+              height: "40px",
+              border: "none",
+              borderRadius: "9999px",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              color: "#121212",
+              background: "rgba(255, 255, 255, 0.92)",
+              transition: "opacity 0.2s ease",
+            }}
           >
             {isSubmitting ? <Loader2 className="message-input-spinner" size={18} /> : <SendHorizontal size={18} />}
           </button>
@@ -66,29 +322,6 @@ export default function MessageInput({ disabled, onSubmit }: MessageInputProps):
       </form>
 
       <style>{`
-        .message-input-root {
-          border: 1px solid rgba(255, 255, 255, 0.12);
-          border-radius: 16px;
-          background: rgba(18, 18, 18, 0.9);
-          padding: 12px;
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-        }
-
-        .message-input-field {
-          width: 100%;
-          resize: vertical;
-          min-height: 54px;
-          max-height: 180px;
-          border: 1px solid rgba(255, 255, 255, 0.14);
-          border-radius: 12px;
-          background: rgba(255, 255, 255, 0.03);
-          color: #f5f5f5;
-          padding: 10px 12px;
-          font-size: 14px;
-          line-height: 1.4;
-        }
 
         .message-input-field:focus {
           outline: none;
@@ -99,34 +332,6 @@ export default function MessageInput({ disabled, onSubmit }: MessageInputProps):
           color: rgba(255, 255, 255, 0.45);
         }
 
-        .message-input-actions {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 8px;
-        }
-
-        .message-input-provider {
-          font-size: 12px;
-          color: rgba(255, 255, 255, 0.6);
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-
-        .message-input-submit {
-          width: 40px;
-          height: 40px;
-          border: none;
-          border-radius: 9999px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          color: #121212;
-          background: rgba(255, 255, 255, 0.92);
-          transition: opacity 0.2s ease;
-        }
 
         .message-input-submit:disabled {
           cursor: not-allowed;
@@ -146,23 +351,7 @@ export default function MessageInput({ disabled, onSubmit }: MessageInputProps):
           }
         }
 
-        .msg-input-text {
-          align-items: flex-start;
-          display: inline-flex;
-        }
 
-        .msg-input-text-wrapper {
-          color: #1e1e1e;
-          font-family: "Inter", Helvetica;
-          font-size: 16px;
-          font-style: normal;
-          font-weight: 400;
-          letter-spacing: 0;
-          line-height: 139.9999976158142%;
-          white-space: nowrap;
-          width: fit-content;
-          color: rgba(255, 255, 255, 0.72);
-        }
       `}</style>
     </>
   );

@@ -8,5 +8,17 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     host: "127.0.0.1"
+  },
+  build: {
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules")) {
+            return "vendor";
+          }
+        }
+      }
+    }
   }
 });

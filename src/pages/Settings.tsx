@@ -457,13 +457,11 @@ export default function Settings({ isOpen, onClose, activeTab, onTabChange, onTh
                         <Thermometer size={12} />
                         Temperature
                       </label>
-                      <CyberSlider
-                        min={0}
-                        max={2}
-                        step={0.1}
+                      <textarea
+                        inputMode="numeric"
                         value={temperature}
                         onChange={(e) => setTemperature(Number(e.target.value))}
-                        valueLabel={temperature.toFixed(1)}
+                        className="w-full px-3 py-2 rounded-md bg-[rgba(255,255,255,0.03)] border border-transparent focus:border-[rgba(255,255,255,0.1)] focus:ring-1 focus:ring-[rgba(255,255,255,0.1)] text-micro font-mono resize-none h-10"
                       />
                     </div>
                     <div className="space-y-2">
@@ -471,20 +469,14 @@ export default function Settings({ isOpen, onClose, activeTab, onTabChange, onTh
                         className="text-micro font-medium flex items-center gap-1.5"
                         style={{ color: "var(--text-muted)" }}
                       >
-                        <Sliders size={12} />
                         Max Tokens
                       </label>
-                      <CyberSlider
-                        min={64}
-                        max={8192}
-                        step={64}
+                      <textarea
+                      inputMode="numeric"
+                        
                         value={maxTokens}
                         onChange={(e) => setMaxTokens(Number(e.target.value))}
-                        valueLabel={
-                          maxTokens >= 1000
-                            ? `${(maxTokens / 1000).toFixed(1)}k`
-                            : String(maxTokens)
-                        }
+                        className="w-full px-3 py-2 rounded-md bg-[rgba(255,255,255,0.03)] border border-transparent focus:border-[rgba(255,255,255,0.1)] focus:ring-1 focus:ring-[rgba(255,255,255,0.1)] text-micro font-mono resize-none h-10"
                       />
                     </div>
                   </div>

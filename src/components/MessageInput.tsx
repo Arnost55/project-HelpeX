@@ -97,8 +97,17 @@ export default function MessageInput({ disabled, onSubmit }: MessageInputProps):
 
   const isDisabled = disabled || isSubmitting;
 
+
   return (
-    <>
+    <div
+    className="message-input-container"
+    style={{
+      margin: "auto auto",
+      width: "50%",
+      position: "relative",
+
+      }}
+    >
       <form className="message-input-root" onSubmit={handleSubmit}
       style={{
           border: "1px solid rgba(255, 255, 255, 0.9)",
@@ -117,6 +126,7 @@ export default function MessageInput({ disabled, onSubmit }: MessageInputProps):
           value={text}
           onChange={(event) => setText(event.target.value)}
           placeholder="Type your message..."
+
           rows={1}
           disabled={isDisabled}
           inputMode="text"
@@ -132,6 +142,7 @@ export default function MessageInput({ disabled, onSubmit }: MessageInputProps):
             padding: "10px 12px",
             fontSize: "14px",
             lineHeight: "1.4",
+            transition: "border-color 0.2s ease",
           }}
         />
 
@@ -167,6 +178,7 @@ export default function MessageInput({ disabled, onSubmit }: MessageInputProps):
                     background: "transparent",
                     cursor: "pointer",
                     padding: 0,
+                    borderColor: "rgba(0, 0, 0, 0.14)",
                   }}
                 >
                   {provider} - {model} <span className="sr-only">Change provider and model</span>
@@ -254,7 +266,7 @@ export default function MessageInput({ disabled, onSubmit }: MessageInputProps):
                       <button
                         type="submit"
                         style={{
-                          width: "100%",
+                          width: "50%",
                           border: "none",
                           borderRadius: "6px",
                           padding: "7px 10px",
@@ -289,7 +301,7 @@ export default function MessageInput({ disabled, onSubmit }: MessageInputProps):
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     display: "inline-flex",
-                    alignItems: "center",
+                    alignItems: "left",
                     gap: "4px",
                     border: "none",
                     background: "transparent",
@@ -297,7 +309,7 @@ export default function MessageInput({ disabled, onSubmit }: MessageInputProps):
                     padding: 0,
                   }}
                 >
-                  <LucideCirclePlus size={18} style={{ transform: isOpen ? "rotate(45deg)" : "rotate(0deg)", color: "rgba(255, 255, 255, 0.6)", cursor: "pointer" }} />
+                  <LucideCirclePlus size={18} style={{ transform: isOpen ? "rotate(45deg)" : "rotate(0deg)", color: "rgba(0, 0, 0, 0.6)", cursor: "pointer", alignItems: "center" }} />
                 </button>
 
                 {isOpen && (
@@ -313,9 +325,27 @@ export default function MessageInput({ disabled, onSubmit }: MessageInputProps):
                       borderRadius: "8px",
                       padding: "8px",
                       zIndex: 20,
+                      transition: "opacity 0.2s ease",
+                      boxShadow: "0 8px 20px rgba(0, 0, 0, 0.3)",
                     }}
                   >
-                    <button type="button" onClick={() => { /* placeholder action */ close(); }} style={{ width: "100%", padding: "6px", border: "none", borderRadius: "6px", background: "transparent", color: "white", textAlign: "left" }}>Quick action</button>
+                    <button
+                      type="button"
+                      onClick={() => { alert("Add file action"); close(); }}
+                      style={{
+                        width: "100%",
+                        border: "none",
+                        borderRadius: "6px",
+                        padding: "6px 8px",
+                        fontSize: "12px",
+                        textAlign: "left",
+                        cursor: "pointer",
+                        color: "white",
+                        background: "rgba(255, 255, 255, 0.08)",
+                      }}
+                    >
+                      Add file
+                    </button>
                   </div>
                 )}
 
@@ -357,7 +387,7 @@ export default function MessageInput({ disabled, onSubmit }: MessageInputProps):
         }
 
         .message-input-field::placeholder {
-          color: rgba(255, 255, 255, 0.45);
+          color: rgb(0, 0, 0);
         }
 
 
@@ -381,7 +411,7 @@ export default function MessageInput({ disabled, onSubmit }: MessageInputProps):
 
 
       `}</style>
-    </>
+    </div>
   );
 }
 

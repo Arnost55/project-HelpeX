@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { X } from "lucide-react";
 import { useSettingsStore } from "../store/settingsStore";
@@ -15,6 +15,7 @@ import {
   MessageSquareWarning,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import Dropdown from "../components/ui/Dropdown";
 
 type Provider = "openai" | "claude" | "ollama" | "groq" | "together";
 type SettingsTab = "ai" | "integration" | "appearance" | "system";
@@ -369,192 +370,32 @@ export default function Settings({ isOpen, onClose, activeTab, onTabChange, onTh
                     </span>
                   </div>
                 </div>
-
                 <div className="cyber-card">
-                  <SectionHeader icon={Brain} title="AI Configuration" />
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
+                  <SectionHeader icon={Brain} title="Provider & Model" />
+                  <div className="flex items-center gap-3 mt-2">
+                    <div className="flex-1">
                       <label
-                        className="text-micro font-medium flex items-center gap-1.5"
+                        className="text-micro font-medium uppercase tracking-wider"
                         style={{ color: "var(--text-muted)" }}
                       >
-                        <Cpu size={12} />
-                        Primary Provider
-                      </label>
-                      <CyberSelect
-                        value={provider}
-                        onChange={(e) => handleProviderChange(e.target.value)}
-                      >
-                        <option value="openai">OpenAI</option>
-                        <option value="claude">Claude</option>
-                        <option value="ollama">Ollama</option>
-                        <option value="groq">Groq</option>
-                        <option value="together">Together</option>
-                      </CyberSelect>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label
-                        className="text-micro font-medium flex items-center gap-1.5"
-                        style={{ color: "var(--text-muted)" }}
-                      >
-                        <Layers size={12} />
-                        Model
-                      </label>
-                      <div className="relative">
-                        <CyberInput
-                          placeholder="e.g. gpt-4o-mini"
-                          value={model}
-                          onChange={(e) => setModel(e.target.value)}
-                          className="pr-8"
-                        />
-                        <button
-                          onClick={handleFetchModels}
-                          disabled={loadingModels}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 motion-safe:transition-colors duration-150 ease-out"
-                          style={{ color: "var(--text-muted)" }}
-                          onMouseEnter={(e) =>
-                            (e.currentTarget.style.color = "var(--accent-glow)")
-                          }
-                          onMouseLeave={(e) =>
-                            (e.currentTarget.style.color = "var(--text-muted)")
-                          }
-                          title="Fetch models"
-                        >
-                          <RefreshCw
-                            size={14}
-                            className={loadingModels ? "animate-spin" : ""}
-                          />
-                        </button>
-                      </div>
-                      {availableModels.length > 0 && (
-                        <div className="mt-2 max-h-32 overflow-y-auto space-y-1">
-                          {availableModels.map((m) => (
-                            <button
-                              key={m}
-                              className={`w-full text-left px-3 py-1.5 rounded text-micro font-mono motion-safe:transition-colors duration-150 ease-out ${
-                                m === model
-                                  ? ""
-                                  : "hover:bg-[rgba(255,255,255,0.02)] border border-transparent"
-                              }`}
-                              style={{
-                                color: m === model ? "var(--accent-glow)" : "var(--text-muted)",
-                                backgroundColor: m === model ? "var(--accent-soft)" : "transparent",
-                                borderColor: m === model ? "var(--border-focus)" : "transparent",
-                              }}
-                              onClick={() => setModel(m)}
-                            >
-                              {m}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div className="space-y-2">
-                      <label
-                        className="text-micro font-medium flex items-center gap-1.5"
-                        style={{ color: "var(--text-muted)" }}
-                      >
-                        <Thermometer size={12} />
-                        Temperature
-                      </label>
-                      <textarea
-                        inputMode="numeric"
-                        value={temperature}
-                        onChange={(e) => setTemperature(Number(e.target.value))}
-                        className="w-full px-3 py-2 rounded-md bg-[rgba(255,255,255,0.03)] border border-transparent focus:border-[rgba(255,255,255,0.1)] focus:ring-1 focus:ring-[rgba(255,255,255,0.1)] text-micro font-mono resize-none h-10"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label
-                        className="text-micro font-medium flex items-center gap-1.5"
-                        style={{ color: "var(--text-muted)" }}
-                      >
-                        Max Tokens
-                      </label>
-                      <textarea
-                      inputMode="numeric"
+                        Providers
+                    </label>
                         
-                        value={maxTokens}
-                        onChange={(e) => setMaxTokens(Number(e.target.value))}
-                        className="w-full px-3 py-2 rounded-md bg-[rgba(255,255,255,0.03)] border border-transparent focus:border-[rgba(255,255,255,0.1)] focus:ring-1 focus:ring-[rgba(255,255,255,0.1)] text-micro font-mono resize-none h-10"
-                      />
                     </div>
+                    
                   </div>
-
-                  <SectionDivider label="Fallback" />
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <label
-                        className="text-micro font-medium"
-                        style={{ color: "var(--text-muted)" }}
-                      >
-                        Fallback Provider
-                      </label>
-                      <CyberSelect
-                        value={fallbackProvider}
-                        onChange={(e) => setFallbackProvider(e.target.value as "none" | Provider)}
-                      >
-                        <option value="none">None</option>
-                        <option value="openai">OpenAI</option>
-                        <option value="claude">Claude</option>
-                        <option value="ollama">Ollama</option>
-                        <option value="groq">Groq</option>
-                        <option value="together">Together</option>
-                      </CyberSelect>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label
-                        className="text-micro font-medium"
-                        style={{ color: "var(--text-muted)" }}
-                      >
-                        Fallback Model
-                      </label>
-                      <CyberInput
-                        placeholder="e.g. gpt-4o-mini"
-                        value={fallbackModel}
-                        onChange={(e) => setFallbackModel(e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  <div
-                    className="mt-4 pt-4"
-                    style={{ borderTop: "1px solid var(--border-panel)" }}
-                  >
-                    <div className="flex items-center justify-between">
-                      <button
-                        onClick={handleHealthCheck}
-                        disabled={checkingHealth}
-                        className="cyber-btn"
-                      >
-                        <Gauge size={14} />
-                        {checkingHealth ? "Checking..." : "Test Connection"}
-                      </button>
-                      {healthStatus && (
-                        <div className="flex items-center gap-2 text-xs">
-                          <span
-                            className={`status-dot ${
-                              healthStatus.healthy ? "healthy" : "disconnected"
-                            }`}
-                          />
-                          <span
-                            style={{
-                              color: healthStatus.healthy
-                                ? "var(--accent-glow)"
-                                : "var(--danger)",
-                            }}
-                            className="text-micro"
+                      <div className="flex items-center gap-3 mt-2">
+                        <CyberSelect
+                          value="test"
                           >
-                            {healthStatus.message}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+
+                        </CyberSelect>
+                      </div>
+
+
                 </div>
               </>
             )}
-
             {activeTab === "integration" && (
               <>
                 <div className="mb-4">

@@ -12,6 +12,7 @@ use jarvis_core::db;
 use jarvis_core::error::AppError;
 use jarvis_core::models::{
     ChatStreamRequest, Conversation, Message, ProviderHealthResponse, ProviderRequest,
+    UserProfile,
     StreamChunkEvent, StreamDoneEvent, StreamErrorEvent, StreamProviderEvent,
 };
 
@@ -923,6 +924,18 @@ pub fn list_messages(app: AppHandle, conversation_id: String) -> Result<Vec<Mess
 }
 
 #[tauri::command]
+pub fn save_user_profile(app: AppHandle, profile: UserProfile) -> Result<(), String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    db::save_user_profile(&app_data_dir, profile).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn load_user_profile(app: AppHandle) -> Result<Option<UserProfile>, String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    db::load_user_profile(&app_data_dir).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn stream_chat(app: AppHandle, request: ChatStreamRequest) -> Result<(), String> {
     if request.provider.trim().is_empty() {
         return Err("Missing provider".to_string());
@@ -1182,6 +1195,13 @@ pub async fn wipe_all_data(app: AppHandle) -> Result<(), String> {
         "All data has been securely erased.",
     );
 
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn reset_database(app: AppHandle) -> Result<(), String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    db::reset_database(&app_data_dir).map_err(|e| e.to_string())?;
     Ok(())
 }
 

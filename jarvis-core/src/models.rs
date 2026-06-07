@@ -18,6 +18,15 @@ pub struct Message {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct UserProfile {
+    pub id: String,
+    pub first_name: String,
+    pub last_name: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatInputMessage {
     pub role: String,

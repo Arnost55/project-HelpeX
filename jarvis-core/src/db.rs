@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use rusqlite::{params, Connection};
 
 use crate::error::AppError;
-use crate::models::{Conversation, Message};
+use crate::models::{Conversation, Message, UserProfile};
 
 pub fn get_db_path(app_data_dir: &PathBuf) -> Result<PathBuf, AppError> {
     if !app_data_dir.exists() {
@@ -43,6 +43,14 @@ pub fn init(app_data_dir: &PathBuf) -> Result<(), AppError> {
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                id TEXT PRIMARY KEY,
+                first_name TEXT NOT NULL DEFAULT '',
+                last_name TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             "
         )?;
         conn.pragma_update(None, "user_version", 1)?;
@@ -69,6 +77,31 @@ pub fn init(app_data_dir: &PathBuf) -> Result<(), AppError> {
         )?;
 
         conn.pragma_update(None, "user_version", 2)?;
+    }
+
+    let profile_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if profile_version < 3 {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                id TEXT PRIMARY KEY,
+                first_name TEXT NOT NULL DEFAULT '',
+                last_name TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            "
+        )?;
+
+        conn.execute(
+            "
+            INSERT OR IGNORE INTO user_profiles (id, first_name, last_name, created_at, updated_at)
+            VALUES ('default', '', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ",
+            [],
+        )?;
+
+        conn.pragma_update(None, "user_version", 3)?;
     }
 
     Ok(())
@@ -201,16 +234,64 @@ pub fn list_messages(app_data_dir: &PathBuf, conversation_id: String) -> Result<
     Ok(out)
 }
 
+pub fn save_user_profile(app_data_dir: &PathBuf, profile: UserProfile) -> Result<(), AppError> {
+    let conn = connect(app_data_dir)?;
+    conn.execute(
+        "
+        INSERT INTO user_profiles (id, first_name, last_name, created_at, updated_at)
+        VALUES (?1, ?2, ?3, ?4, ?5)
+        ON CONFLICT(id) DO UPDATE SET
+            first_name=excluded.first_name,
+            last_name=excluded.last_name,
+            updated_at=excluded.updated_at
+        ",
+        params![
+            profile.id,
+            profile.first_name,
+            profile.last_name,
+            profile.created_at,
+            profile.updated_at
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn load_user_profile(app_data_dir: &PathBuf) -> Result<Option<UserProfile>, AppError> {
+    let conn = connect(app_data_dir)?;
+    let mut stmt = conn.prepare(
+        "
+        SELECT id, first_name, last_name, created_at, updated_at
+        FROM user_profiles
+        WHERE id = 'default'
+        LIMIT 1
+        ",
+    )?;
+
+    let mut rows = stmt.query([])?;
+    if let Some(row) = rows.next()? {
+        return Ok(Some(UserProfile {
+            id: row.get(0)?,
+            first_name: row.get(1)?,
+            last_name: row.get(2)?,
+            created_at: row.get(3)?,
+            updated_at: row.get(4)?,
+        }));
+    }
+
+    Ok(None)
+}
+
 
 
 pub fn reset_database(app_data_dir: &PathBuf) -> Result<(), AppError> {
     let db_path = get_db_path(app_data_dir)?;
     let cfg = app_data_dir.join("config.json");
     if cfg.exists() {
-        fs::remove_file(cfg).map_err(|err| AppError::Config(err.to_string()))?;
+        fs::remove_file(cfg).map_err(|err| AppError::Io(err.to_string()))?;
     }
     if db_path.exists() {
         fs::remove_file(db_path).map_err(|err| AppError::Database(err.to_string()))?;
     }
     Ok(())
 }
+

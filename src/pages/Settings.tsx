@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { X } from "lucide-react";
+import { PlusCircleIcon, X } from "lucide-react";
 import { useSettingsStore } from "../store/settingsStore";
 import { checkProviderHealth, listProviderModels } from "../api/providers";
 import { getAvailableThemes, type ThemeDefinition } from "../api/settingsApi";
@@ -12,7 +12,7 @@ import {
   Brain, Cpu, Thermometer, Layers, Palette, Type, Code, PlugZap,
   Eye, EyeOff, RefreshCw, CheckCircle2, Gauge,
   Sliders, Key, Globe, Command, Minimize2, Bell,
-  MessageSquareWarning,
+  MessageSquareWarning, PlusCircle
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import Dropdown from "../components/ui/Dropdown";
@@ -382,14 +382,10 @@ export default function Settings({ isOpen, onClose, activeTab, onTabChange, onTh
                     </label>
                         
                     </div>
-                    
+                      <PlusCircle size={16} />
                   </div>
                       <div className="flex items-center gap-3 mt-2">
-                        <CyberSelect
-                          value="test"
-                          >
-
-                        </CyberSelect>
+                        
                       </div>
 
 

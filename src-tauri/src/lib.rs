@@ -77,6 +77,7 @@ pub fn run() {
             commands::run_jarvis_task,
             commands::wipe_all_data,
             commands::reset_database,
+            commands::restart_application,
             commands::list_available_themes,
             mcp::mcp_spawn_and_initialize,
             mcp::mcp_get_active_tools,

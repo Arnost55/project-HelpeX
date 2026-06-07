@@ -1201,8 +1201,27 @@ pub async fn wipe_all_data(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn reset_database(app: AppHandle) -> Result<(), String> {
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+
+    // 1. Delete database + config
     db::reset_database(&app_data_dir).map_err(|e| e.to_string())?;
+
+    // 2. Delete config.dat
+    let config_path = app_data_dir.join("jarvis-config.dat");
+    if config_path.exists() {
+        std::fs::remove_file(&config_path).map_err(|e| e.to_string())?;
+    }
+
+    // 3. Clear WebView storage (localStorage where Zustand persists chats)
+    if let Some(window) = app.get_webview_window("main") {
+        window.clear_all_browsing_data().map_err(|e| e.to_string())?;
+    }
+
     Ok(())
+}
+
+#[tauri::command]
+pub fn restart_application(app: AppHandle) {
+    app.restart();
 }
 
 // ─── Run Jarvis Task (non-streaming quick action) ─────────────────────────

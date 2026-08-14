@@ -16,6 +16,8 @@ use jarvis_core::models::{
     StreamChunkEvent, StreamDoneEvent, StreamErrorEvent, StreamProviderEvent,
 };
 
+use crate::agent;
+
 static STREAM_CANCEL_REGISTRY: OnceLock<Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>> =
     OnceLock::new();
 
@@ -758,12 +760,6 @@ async fn run_stream_with_fallback(app: AppHandle, request: ChatStreamRequest) ->
     for provider in providers {
         match stream_from_provider(&app, &request, &provider, &mut cancel_rx).await {
             Ok(()) => {
-                let _ = app.emit(
-                    "chat-stream-done",
-                    StreamDoneEvent {
-                        stream_id: request.stream_id.clone(),
-                    },
-                );
                 return Ok(());
             }
             Err(e) => {
@@ -953,7 +949,14 @@ pub async fn stream_chat(app: AppHandle, request: ChatStreamRequest) -> Result<(
     let stream_id = request.stream_id.clone();
 
     tauri::async_runtime::spawn(async move {
-        if let Err(error) = run_stream_with_fallback(app_for_stream.clone(), request).await {
+        let should_use_tools = agent::should_use_agent_loop(&app_for_stream, &request).await;
+        let result = if should_use_tools {
+            agent::run_tool_loop_stream(app_for_stream.clone(), request).await
+        } else {
+            run_stream_with_fallback(app_for_stream.clone(), request).await
+        };
+
+        if let Err(error) = result {
             emit_stream_error(&app_for_stream, &stream_id, error.to_string());
         }
 

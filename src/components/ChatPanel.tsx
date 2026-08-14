@@ -36,6 +36,22 @@ interface StreamProviderEvent {
   fallbackUsed: boolean;
 }
 
+interface AgentToolEvent {
+  streamId: string;
+  serverName: string;
+  toolName: string;
+  summary?: string | null;
+  durationMs?: number | null;
+  permissionDecision?: string | null;
+}
+
+interface ToolActivity {
+  key: string;
+  label: string;
+  status: "running" | "success" | "error";
+  summary?: string;
+}
+
 function isKnownProvider(value: string): value is "openai" | "claude" | "ollama" | "groq" | "together" {
   return value === "openai" || value === "claude" || value === "ollama" || value === "groq" || value === "together";
 }
@@ -76,6 +92,7 @@ export default function ChatPanel(props: { onNavigate?: (tab: "chat" | "settings
   const [activeStreamProvider, setActiveStreamProvider] = useState<string | null>(null);
   const [activeFallbackUsed, setActiveFallbackUsed] = useState(false);
   const { activeServers, executeTool } = useMcp();
+  const [toolActivities, setToolActivities] = useState<ToolActivity[]>([]);
 
   const activeConversation = useMemo(() => {
     if (activeConversationId) {
@@ -326,6 +343,7 @@ Do NOT claim you lack file system or local workspace access. Use your available 
     });
 
     try {
+      setToolActivities([]);
       const streamId = createId("stream");
       setActiveStreamId(streamId);
       setActiveStreamProvider(null);
@@ -358,12 +376,18 @@ Do NOT claim you lack file system or local workspace access. Use your available 
         let unlistenDone: () => void = () => {};
         let unlistenError: () => void = () => {};
         let unlistenProvider: () => void = () => {};
+        let unlistenToolStart: () => void = () => {};
+        let unlistenToolResult: () => void = () => {};
+        let unlistenToolError: () => void = () => {};
 
         const cleanup = () => {
           unlistenChunk();
           unlistenDone();
           unlistenError();
           unlistenProvider();
+          unlistenToolStart();
+          unlistenToolResult();
+          unlistenToolError();
         };
 
         const resolveOnce = () => {
@@ -406,6 +430,50 @@ Do NOT claim you lack file system or local workspace access. Use your available 
           fallbackWasUsed = event.payload.fallbackUsed;
           setActiveFallbackUsed(event.payload.fallbackUsed);
           setActiveStreamProvider(`${providerLabel} • ${event.payload.model}`);
+        });
+
+        unlistenToolStart = await listen<AgentToolEvent>("agent-tool-start", (event) => {
+          if (event.payload.streamId !== streamId) return;
+          const key = `${event.payload.serverName}::${event.payload.toolName}`;
+          setToolActivities((current) => {
+            const next = current.filter((item) => item.key !== key);
+            next.push({
+              key,
+              label: `${event.payload.serverName} • ${event.payload.toolName}`,
+              status: "running"
+            });
+            return next;
+          });
+        });
+
+        unlistenToolResult = await listen<AgentToolEvent>("agent-tool-result", (event) => {
+          if (event.payload.streamId !== streamId) return;
+          const key = `${event.payload.serverName}::${event.payload.toolName}`;
+          setToolActivities((current) => {
+            const next = current.filter((item) => item.key !== key);
+            next.push({
+              key,
+              label: `${event.payload.serverName} • ${event.payload.toolName}`,
+              status: "success",
+              summary: event.payload.summary ?? undefined
+            });
+            return next;
+          });
+        });
+
+        unlistenToolError = await listen<AgentToolEvent>("agent-tool-error", (event) => {
+          if (event.payload.streamId !== streamId) return;
+          const key = `${event.payload.serverName}::${event.payload.toolName}`;
+          setToolActivities((current) => {
+            const next = current.filter((item) => item.key !== key);
+            next.push({
+              key,
+              label: `${event.payload.serverName} • ${event.payload.toolName}`,
+              status: "error",
+              summary: event.payload.summary ?? undefined
+            });
+            return next;
+          });
         });
 
         try {
@@ -629,15 +697,38 @@ Do NOT claim you lack file system or local workspace access. Use your available 
         </div>
       ) : null}
 
+      {toolActivities.length > 0 ? (
+        <div className="mx-5 mt-3 rounded-lg px-4 py-3" style={{ backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-panel)' }}>
+          <div className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
+            Agent Actions
+          </div>
+          <div className="space-y-2">
+            {toolActivities.map((activity) => (
+              <div key={activity.key} className="flex items-start gap-2 text-xs">
+                <span style={{ color: activity.status === "error" ? 'var(--danger)' : activity.status === "success" ? 'var(--accent-glow)' : 'var(--text-muted)' }}>
+                  {activity.status === "running" ? "…" : activity.status === "success" ? "✓" : "!"}
+                </span>
+                <div className="min-w-0">
+                  <div style={{ color: 'var(--text-primary)' }}>{activity.label}</div>
+                  {activity.summary ? (
+                    <div className="truncate" style={{ color: 'var(--text-muted)' }}>{activity.summary}</div>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {/* Messages */}
       {activeConversation && activeConversation.messages.length > 0 ? (
         <>
           <MessageList messages={activeConversation.messages} isStreaming={isStreaming} />
-          <MessageInput disabled={isStreaming} onSubmit={Object.keys(activeServers).length > 0 ? handleMCPChat : handleSend} />
+          <MessageInput disabled={isStreaming} onSubmit={handleSend} />
         </>
       ) : (
         <>
-          <MessageInput disabled={isStreaming} onSubmit={Object.keys(activeServers).length > 0 ? handleMCPChat : (t) => handleSend(t)} />
+          <MessageInput disabled={isStreaming} onSubmit={(t) => handleSend(t)} />
         </>
       )}
 

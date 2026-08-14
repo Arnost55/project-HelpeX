@@ -1,49 +1,61 @@
+mod agent;
 mod commands;
-mod mcp;
-mod tray;
 mod hotkeys;
+mod mcp;
 mod notifications;
+mod tray;
 
+use mcp::McpSystemState;
 use tauri::Manager;
-use mcp::{McpSystemState, ActiveServer, JsonRpcRequest, JsonRpcResponse, McpTool};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use std::process::Stdio;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app, shortcut, _event| {
-            hotkeys::on_hotkey_pressed(app, shortcut);
-        }).build())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, _event| {
+                    hotkeys::on_hotkey_pressed(app, shortcut);
+                })
+                .build(),
+        )
         .manage(McpSystemState::default())
         .setup(|app| {
             let app_handle = app.handle().clone();
 
-            let app_data_dir = app.path().app_data_dir()
-                .map_err(|err| Box::<dyn std::error::Error>::from(err.to_string()))?;
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|error| Box::<dyn std::error::Error>::from(error.to_string()))?;
 
             jarvis_core::db::init(&app_data_dir)
-                .map_err(|err| Box::<dyn std::error::Error>::from(err.to_string()))?;
+                .map_err(|error| Box::<dyn std::error::Error>::from(error.to_string()))?;
 
             tray::create_tray(&app_handle)
-                .map_err(|err| Box::<dyn std::error::Error>::from(err.to_string()))?;
+                .map_err(|error| Box::<dyn std::error::Error>::from(error.to_string()))?;
 
             hotkeys::register_hotkeys(&app_handle)
-                .map_err(|err| Box::<dyn std::error::Error>::from(err.to_string()))?;
+                .map_err(|error| Box::<dyn std::error::Error>::from(error.to_string()))?;
 
-            notifications::notify_info(&app_handle, "JARVIS AI", "Application started successfully");
+            notifications::notify_info(
+                &app_handle,
+                "JARVIS AI",
+                "Application started successfully",
+            );
 
-            // Auto-restore persisted MCP server configs
             if let Ok(configs) = mcp::load_persisted_servers(&app_handle) {
                 for cfg in configs {
                     if cfg.cmd.is_empty() {
                         continue;
                     }
+
                     let handle = app_handle.clone();
                     tauri::async_runtime::spawn(async move {
-                        if let Err(e) = auto_spawn_and_register(&handle, &cfg.name, &cfg.cmd, &cfg.args).await {
-                            eprintln!("[MCP] Failed to auto-restore '{}': {}", cfg.name, e);
+                        if let Err(error) =
+                            mcp::auto_spawn_and_register(&handle, &cfg.name, &cfg.cmd, &cfg.args)
+                                .await
+                        {
+                            eprintln!("[MCP] Failed to auto-restore '{}': {}", cfg.name, error);
                         }
                     });
                 }
@@ -81,119 +93,12 @@ pub fn run() {
             commands::list_available_themes,
             mcp::mcp_spawn_and_initialize,
             mcp::mcp_get_active_tools,
+            mcp::mcp_execute_tool,
             mcp::mcp_disconnect_server,
             mcp::mcp_hydrate_saved_servers,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|_app_handle, event| {
-        if let tauri::RunEvent::Exit = event {
-        }
-    });
-}
-
-async fn auto_spawn_and_register(
-    app: &tauri::AppHandle,
-    name: &str,
-    cmd: &str,
-    args: &[String],
-) -> Result<(), String> {
-    let resolved_cmd = mcp::resolve_executable_path(cmd);
-    println!("🔍 [Tauri Path Resolver] Resolved raw token '{}' to absolute target path: '{}'", cmd, resolved_cmd);
-
-    let mut command_builder = tokio::process::Command::new(&resolved_cmd);
-    command_builder.args(args);
-    command_builder.stdin(Stdio::piped());
-    command_builder.stdout(Stdio::piped());
-    command_builder.stderr(Stdio::piped());
-
-    #[cfg(target_os = "windows")]
-    {
-        command_builder.creation_flags(0x08000000);
-    }
-
-    let mut child = command_builder.spawn().map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            format!(
-                "Executable '{}' could not be resolved by your OS environment. Current Tauri PATH search scope: {:?}", 
-                cmd, 
-                std::env::var("PATH").unwrap_or_default()
-            )
-        } else {
-            format!("Process execution runtime block failure: {}", e)
-        }
-    })?;
-
-    let mut stdin = child.stdin.take().ok_or("Failed to seize stdin handle")?;
-    let stdout = child.stdout.take().ok_or("Failed to seize stdout handle")?;
-
-    let init_req = JsonRpcRequest {
-        jsonrpc: "2.0".to_string(),
-        method: "initialize".to_string(),
-        id: 1,
-        params: serde_json::json!({
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": { "name": "JARVIS-Desktop", "version": "1.0.0" }
-        }),
-    };
-
-    let raw_payload = serde_json::to_string(&init_req).unwrap() + "\n";
-    stdin.write_all(raw_payload.as_bytes()).await.map_err(|e| e.to_string())?;
-    stdin.flush().await.map_err(|e| e.to_string())?;
-
-    let mut reader = BufReader::new(stdout).lines();
-    let mut discovered_tools = Vec::new();
-
-    if let Some(line) = reader.next_line().await.map_err(|e| e.to_string())? {
-        let res: JsonRpcResponse = serde_json::from_str(&line)
-            .map_err(|e| format!("Handshake parse error: {} | Content: {}", e, line))?;
-
-        if let Some(_error) = res.error {
-            return Err(format!("Auto-restore handshake rejected: {:?}", _error));
-        }
-
-        let list_req = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            method: "tools/list".to_string(),
-            id: 2,
-            params: serde_json::json!({}),
-        };
-
-        let list_payload = serde_json::to_string(&list_req).unwrap() + "\n";
-        stdin.write_all(list_payload.as_bytes()).await.map_err(|e| e.to_string())?;
-        stdin.flush().await.map_err(|e| e.to_string())?;
-
-        if let Some(list_line) = reader.next_line().await.map_err(|e| e.to_string())? {
-            let list_res: JsonRpcResponse = serde_json::from_str(&list_line)
-                .map_err(|e| format!("Tools parse error: {}", e))?;
-
-            if let Some(result) = list_res.result {
-                if let Some(tools_array) = result.get("tools") {
-                    discovered_tools = serde_json::from_value::<Vec<McpTool>>(tools_array.clone())
-                        .map_err(|e| format!("Schema mapping failure: {}", e))?;
-                }
-            }
-        }
-    }
-
-    let (stdin_tx, mut stdin_rx) = tokio::sync::mpsc::channel::<String>(32);
-    tokio::spawn(async move {
-        while let Some(msg) = stdin_rx.recv().await {
-            let _ = stdin.write_all((msg + "\n").as_bytes()).await;
-            let _ = stdin.flush().await;
-        }
-    });
-
-    let state = app.state::<McpSystemState>();
-    let mut active_map = state.servers.lock().await;
-    active_map.insert(name.to_string(), ActiveServer {
-        process: child,
-        stdin_tx,
-        tools: discovered_tools,
-    });
-
-    eprintln!("[MCP] Auto-restored server: {}", name);
-    Ok(())
+    app.run(|_app_handle, event| if let tauri::RunEvent::Exit = event {});
 }

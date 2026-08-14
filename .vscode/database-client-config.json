@@ -1,0 +1,37 @@
+{
+    "database": {
+        "1780824056576": {
+            "host": "127.0.0.1",
+            "port": 3306,
+            "dbType": "SQLite",
+            "advance": {
+                "idleConfig": {
+                    "enable": true
+                },
+                "hideSystemSchema": true,
+                "groupingTables": false,
+                "loadMetaDataWhenExpandTreeView": true
+            },
+            "treeFeatures": [
+                "trigger",
+                "sequence"
+            ],
+            "usingSSH": false,
+            "useSocksProxy": false,
+            "useHTTPProxy": false,
+            "global": false,
+            "savePassword": "Forever",
+            "readonly": false,
+            "sort": 11,
+            "useSSL": false,
+            "dbPath": "c:\\Users\\Arnika\\AppData\\Roaming\\com.jarvis.ai\\jarvis.db",
+            "fs": {
+                "encoding": "utf8",
+                "showHidden": true
+            },
+            "key": "1780824056576",
+            "connectionKey": "database.connections"
+        }
+    },
+    "$schema": "https://cdn.database-client.com/dbclient/schema.json"
+}

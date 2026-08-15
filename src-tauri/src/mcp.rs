@@ -12,8 +12,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use audit::{log_tool_audit, redact_json_value, summarize_json_value, ToolAuditEntry};
 use authorization::{
-    authorize_request, build_action_context, ActionContext, AuthorizationDecision, RequestAuthority,
-    RequestOrigin,
+    authorize_request, build_action_context, ActionContext, AuthorizationDecision,
+    RequestAuthority, RequestOrigin,
 };
 use client::{McpClient, McpClientError};
 use permissions::{
@@ -564,8 +564,12 @@ pub async fn execute_tool(
             format!("Failed to load MCP permission policy: {}", error),
         )
     })?;
-    let authorization =
-        authorize_request(&policy, &request.server_name, &tool, request.action_context.clone());
+    let authorization = authorize_request(
+        &policy,
+        &request.server_name,
+        &tool,
+        request.action_context.clone(),
+    );
 
     if authorization.decision == PermissionDecision::Ask {
         let state = app_handle.state::<McpSystemState>();
@@ -582,10 +586,7 @@ pub async fn execute_tool(
             ToolExecutionErrorKind::PermissionDenied,
             format!(
                 "Permission {:?} for '{}.{}' ({:?})",
-                authorization.decision,
-                request.server_name,
-                request.tool_name,
-                authorization.level
+                authorization.decision, request.server_name, request.tool_name, authorization.level
             ),
         )
         .with_permission(authorization.permission.clone());
@@ -599,27 +600,33 @@ pub async fn execute_tool(
         if token.is_cancelled() {
             let error = ToolExecutionError::new(
                 ToolExecutionErrorKind::Cancelled,
-                format!("Tool execution cancelled before '{}.{}' ran", request.server_name, request.tool_name),
+                format!(
+                    "Tool execution cancelled before '{}.{}' ran",
+                    request.server_name, request.tool_name
+                ),
             )
             .with_permission(authorization.permission.clone());
-            let audit_entry = ToolAuditEntry::from_cancelled_request(&request, &authorization, &error);
+            let audit_entry =
+                ToolAuditEntry::from_cancelled_request(&request, &authorization, &error);
             let _ = log_tool_audit(app_handle, &audit_entry).await;
             return Err(error);
         }
     }
 
     let started = Instant::now();
-    let response = server.client.request_with_cancel(
-        "tools/call",
-        json!({
-            "name": request.tool_name.clone(),
-            "arguments": request.arguments.clone()
-        }),
-        MCP_TOOL_CALL_TIMEOUT_MS,
-        cancellation.clone(),
-    )
-    .await
-    .map_err(map_client_error)?;
+    let response = server
+        .client
+        .request_with_cancel(
+            "tools/call",
+            json!({
+                "name": request.tool_name.clone(),
+                "arguments": request.arguments.clone()
+            }),
+            MCP_TOOL_CALL_TIMEOUT_MS,
+            cancellation.clone(),
+        )
+        .await
+        .map_err(map_client_error)?;
 
     let duration_ms = started.elapsed().as_millis();
     let is_error = parse_tool_call_is_error(&response);
@@ -907,7 +914,11 @@ fn build_approval_snapshot(
     }
 }
 
-fn emit_approval_resolved(app_handle: &AppHandle, approval: &PendingApprovalSnapshot, status: ApprovalStatus) {
+fn emit_approval_resolved(
+    app_handle: &AppHandle,
+    approval: &PendingApprovalSnapshot,
+    status: ApprovalStatus,
+) {
     let _ = app_handle.emit(
         "agent-tool-approval-resolved",
         ToolApprovalResolvedEvent {
@@ -991,13 +1002,11 @@ async fn request_tool_approval(
     if let Err(error) = emit_result {
         let mut pending = state.pending_approvals.lock().await;
         pending.remove(&request_id);
-        return Err(
-            ToolExecutionError::new(
-                ToolExecutionErrorKind::PermissionRequired,
-                format!("Failed to emit approval request: {}", error),
-            )
-            .with_permission(authorization.permission.clone()),
-        );
+        return Err(ToolExecutionError::new(
+            ToolExecutionErrorKind::PermissionRequired,
+            format!("Failed to emit approval request: {}", error),
+        )
+        .with_permission(authorization.permission.clone()));
     }
 
     let mut approval_timeout = tokio::time::sleep(Duration::from_secs(300));
@@ -1036,9 +1045,7 @@ async fn request_tool_approval(
     };
 
     match resolution {
-        ApprovalResolution::AllowOnce => {
-            Ok(())
-        }
+        ApprovalResolution::AllowOnce => Ok(()),
         ApprovalResolution::Deny => {
             let error = ToolExecutionError::new(
                 ToolExecutionErrorKind::ApprovalRejected,
@@ -1064,7 +1071,8 @@ async fn request_tool_approval(
                 ),
             )
             .with_permission(authorization.permission.clone());
-            let audit_entry = ToolAuditEntry::from_cancelled_request(request, authorization, &error);
+            let audit_entry =
+                ToolAuditEntry::from_cancelled_request(request, authorization, &error);
             let _ = log_tool_audit(app_handle, &audit_entry).await;
             Err(error)
         }

@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::permissions::{
-    evaluate_permission, PermissionDecision, PermissionEvaluation, PermissionLevel, PermissionPolicy,
+    evaluate_permission, PermissionDecision, PermissionEvaluation, PermissionLevel,
+    PermissionPolicy,
 };
 use super::protocol::McpTool;
 
@@ -115,9 +116,9 @@ pub fn authorize_request(
         | RequestOrigin::ExternalEvent => match permission.level {
             PermissionLevel::Read => permission.decision,
             PermissionLevel::Unknown => PermissionDecision::Ask,
-            PermissionLevel::Write
-            | PermissionLevel::Execute
-            | PermissionLevel::Sensitive => PermissionDecision::Deny,
+            PermissionLevel::Write | PermissionLevel::Execute | PermissionLevel::Sensitive => {
+                PermissionDecision::Deny
+            }
         },
     };
 

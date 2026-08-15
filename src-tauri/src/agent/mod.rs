@@ -13,8 +13,8 @@ use jarvis_core::models::{
 };
 
 use crate::agent::cancellation::StreamCancellationToken;
-use crate::mcp::{self, McpSystemState, ToolExecutionRequest};
 use crate::mcp::authorization::{build_action_context, RequestAuthority, RequestOrigin};
+use crate::mcp::{self, McpSystemState, ToolExecutionRequest};
 
 const MAX_TOOL_ITERATIONS: usize = 8;
 const MAX_TOOL_RESULT_CHARS: usize = 12_000;

@@ -3,7 +3,15 @@ pub fn app_restart() {
     {
         use std::process::Command;
         Command::new("cmd")
-            .args(&["TASKKILL", "/IM", "jarvis.exe", "/F", "&&", "start", "jarvis.exe"])
+            .args(&[
+                "TASKKILL",
+                "/IM",
+                "jarvis.exe",
+                "/F",
+                "&&",
+                "start",
+                "jarvis.exe",
+            ])
             .spawn()
             .expect("Failed to restart application");
     }
@@ -29,5 +37,3 @@ pub fn app_restart() {
 pub fn app_exit() {
     std::process::exit(0);
 }
-
-

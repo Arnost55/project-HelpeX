@@ -85,7 +85,8 @@ impl McpClient {
         params: Value,
         timeout_ms: u64,
     ) -> Result<Value, McpClientError> {
-        self.request_with_cancel(method, params, timeout_ms, None).await
+        self.request_with_cancel(method, params, timeout_ms, None)
+            .await
     }
 
     pub async fn request_with_cancel(
@@ -365,9 +366,9 @@ async fn drain_pending(pending: &PendingMap, error: McpClientError) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::cancellation::StreamCancellationRegistry;
     use serde_json::json;
     use tokio::io::{duplex, AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
-    use crate::agent::cancellation::StreamCancellationRegistry;
 
     async fn read_request<R>(reader: &mut BufReader<R>) -> JsonRpcRequest
     where

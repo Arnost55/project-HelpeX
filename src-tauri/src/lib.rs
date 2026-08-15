@@ -5,9 +5,9 @@ mod mcp;
 mod notifications;
 mod tray;
 
+use crate::agent::cancellation::StreamCancellationRegistry;
 use mcp::McpSystemState;
 use tauri::Manager;
-use crate::agent::cancellation::StreamCancellationRegistry;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

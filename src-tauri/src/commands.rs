@@ -11,8 +11,7 @@ use jarvis_core::db;
 use jarvis_core::error::AppError;
 use jarvis_core::models::{
     ChatStreamRequest, Conversation, Message, ProviderHealthResponse, ProviderRequest,
-    UserProfile,
-    StreamChunkEvent, StreamDoneEvent, StreamErrorEvent, StreamProviderEvent,
+    StreamChunkEvent, StreamDoneEvent, StreamErrorEvent, StreamProviderEvent, UserProfile,
 };
 
 use crate::agent;
@@ -197,8 +196,11 @@ fn build_ollama_request_body(request: &ChatStreamRequest, model: &str) -> Value 
         }
     }
 
-    eprintln!("[OLLAMA_BODY] stream=true model={} messages={}",
-        model, request.messages.len());
+    eprintln!(
+        "[OLLAMA_BODY] stream=true model={} messages={}",
+        model,
+        request.messages.len()
+    );
     json
 }
 
@@ -209,9 +211,12 @@ async fn call_ollama_raw_sync(
     url: &str,
     body: Value,
 ) -> Result<Value, String> {
-    eprintln!("[OLLAMA_SYNC] POST {} | body keys: {:?} | stream=false",
+    eprintln!(
+        "[OLLAMA_SYNC] POST {} | body keys: {:?} | stream=false",
         url,
-        body.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()));
+        body.as_object()
+            .map(|o| o.keys().cloned().collect::<Vec<_>>())
+    );
 
     let response = client
         .post(url)
@@ -232,7 +237,8 @@ async fn call_ollama_raw_sync(
         format!("Ollama body read error: {e}")
     })?;
 
-    eprintln!("[OLLAMA_SYNC] Raw body ({len} chars):\n---\n{preview}\n---",
+    eprintln!(
+        "[OLLAMA_SYNC] Raw body ({len} chars):\n---\n{preview}\n---",
         len = raw_text.len(),
         preview = if raw_text.len() > 2000 {
             format!("{}...", &raw_text[..2000])
@@ -249,11 +255,20 @@ async fn call_ollama_raw_sync(
 
     let json: Value = serde_json::from_str(&raw_text).map_err(|e| {
         eprintln!("[OLLAMA_SYNC] *** JSON PARSE FAILED ***: {e}");
-        eprintln!("[OLLAMA_SYNC] --- BEGIN RAW ({len} bytes) ---", len = raw_text.len());
+        eprintln!(
+            "[OLLAMA_SYNC] --- BEGIN RAW ({len} bytes) ---",
+            len = raw_text.len()
+        );
         eprintln!("{raw_text}");
         eprintln!("[OLLAMA_SYNC] --- END RAW ---");
-        format!("Failed to decode Ollama response: {e}\nRaw preview: {}",
-            if raw_text.len() > 200 { &raw_text[..200] } else { &raw_text })
+        format!(
+            "Failed to decode Ollama response: {e}\nRaw preview: {}",
+            if raw_text.len() > 200 {
+                &raw_text[..200]
+            } else {
+                &raw_text
+            }
+        )
     })?;
 
     if let Some(err_str) = json.get("error").and_then(|e| e.as_str()) {
@@ -261,12 +276,18 @@ async fn call_ollama_raw_sync(
         return Err(err_str.to_string());
     }
 
-    eprintln!("[OLLAMA_SYNC] Success. Response keys: {:?}",
-        json.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()));
+    eprintln!(
+        "[OLLAMA_SYNC] Success. Response keys: {:?}",
+        json.as_object()
+            .map(|o| o.keys().cloned().collect::<Vec<_>>())
+    );
     Ok(json)
 }
 
-async fn fetch_openai_models(api_key: &str, base_url: Option<String>) -> Result<Vec<String>, AppError> {
+async fn fetch_openai_models(
+    api_key: &str,
+    base_url: Option<String>,
+) -> Result<Vec<String>, AppError> {
     let chat_url = base_url
         .filter(|v| !v.trim().is_empty())
         .unwrap_or_else(|| "https://api.openai.com/v1/chat/completions".to_string());
@@ -279,7 +300,10 @@ async fn fetch_openai_models(api_key: &str, base_url: Option<String>) -> Result<
         .await?;
 
     if !response.status().is_success() {
-        let error_text = response.text().await.unwrap_or_else(|_| "OpenAI model listing failed".to_string());
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "OpenAI model listing failed".to_string());
         return Err(AppError::Network(parse_provider_error(&error_text)));
     }
 
@@ -298,7 +322,10 @@ async fn fetch_openai_models(api_key: &str, base_url: Option<String>) -> Result<
     Ok(models)
 }
 
-async fn fetch_openai_compatible_models(api_key: &str, base_url: Option<String>) -> Result<Vec<String>, AppError> {
+async fn fetch_openai_compatible_models(
+    api_key: &str,
+    base_url: Option<String>,
+) -> Result<Vec<String>, AppError> {
     let chat_url = base_url
         .filter(|v| !v.trim().is_empty())
         .ok_or_else(|| AppError::Network("Missing provider base URL".to_string()))?;
@@ -311,7 +338,10 @@ async fn fetch_openai_compatible_models(api_key: &str, base_url: Option<String>)
         .await?;
 
     if !response.status().is_success() {
-        let error_text = response.text().await.unwrap_or_else(|_| "Model listing failed".to_string());
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Model listing failed".to_string());
         return Err(AppError::Network(parse_provider_error(&error_text)));
     }
 
@@ -330,7 +360,10 @@ async fn fetch_openai_compatible_models(api_key: &str, base_url: Option<String>)
     Ok(models)
 }
 
-async fn fetch_claude_models(api_key: &str, base_url: Option<String>) -> Result<Vec<String>, AppError> {
+async fn fetch_claude_models(
+    api_key: &str,
+    base_url: Option<String>,
+) -> Result<Vec<String>, AppError> {
     let url = base_url
         .filter(|v| !v.trim().is_empty())
         .unwrap_or_else(|| "https://api.anthropic.com/v1/models".to_string());
@@ -343,7 +376,10 @@ async fn fetch_claude_models(api_key: &str, base_url: Option<String>) -> Result<
         .await?;
 
     if !response.status().is_success() {
-        let error_text = response.text().await.unwrap_or_else(|_| "Claude model listing failed".to_string());
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Claude model listing failed".to_string());
         return Err(AppError::Network(parse_provider_error(&error_text)));
     }
 
@@ -370,7 +406,10 @@ async fn fetch_ollama_models(base_url: Option<String>) -> Result<Vec<String>, Ap
 
     let response = reqwest::Client::new().get(url).send().await?;
     if !response.status().is_success() {
-        let error_text = response.text().await.unwrap_or_else(|_| "Ollama model listing failed".to_string());
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Ollama model listing failed".to_string());
         return Err(AppError::Network(parse_provider_error(&error_text)));
     }
 
@@ -389,7 +428,10 @@ async fn fetch_ollama_models(base_url: Option<String>) -> Result<Vec<String>, Ap
     );
     let payload: Value = serde_json::from_str(&raw_text).map_err(|e| {
         eprintln!("[OLLAMA_MODELS] JSON PARSE FAILED: {e}");
-        eprintln!("[OLLAMA_MODELS] --- BEGIN RAW TEXT ({len} bytes) ---", len = raw_text.len());
+        eprintln!(
+            "[OLLAMA_MODELS] --- BEGIN RAW TEXT ({len} bytes) ---",
+            len = raw_text.len()
+        );
         eprintln!("{raw_text}");
         eprintln!("[OLLAMA_MODELS] --- END RAW TEXT ---");
         AppError::Network(format!("Failed to parse Ollama models response: {e}"))
@@ -408,7 +450,11 @@ async fn fetch_ollama_models(base_url: Option<String>) -> Result<Vec<String>, Ap
     Ok(models)
 }
 
-fn build_health_response(provider: &str, started: Instant, result: Result<(), String>) -> ProviderHealthResponse {
+fn build_health_response(
+    provider: &str,
+    started: Instant,
+    result: Result<(), String>,
+) -> ProviderHealthResponse {
     let latency_ms = started.elapsed().as_millis();
     match result {
         Ok(()) => ProviderHealthResponse {
@@ -622,7 +668,10 @@ async fn stream_from_provider(
 
     let response = create_provider_response(request, provider_config).await?;
     if !response.status().is_success() {
-        let error_text = response.text().await.unwrap_or_else(|_| "Provider request failed".to_string());
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Provider request failed".to_string());
         return Err(AppError::Network(parse_provider_error(&error_text)));
     }
 
@@ -757,9 +806,16 @@ async fn run_stream_with_fallback(
 }
 
 #[tauri::command]
-pub fn save_conversation(app: AppHandle, conversation: Conversation, incognito: Option<bool>) -> Result<(), String> {
+pub fn save_conversation(
+    app: AppHandle,
+    conversation: Conversation,
+    incognito: Option<bool>,
+) -> Result<(), String> {
     if incognito.unwrap_or(false) {
-        eprintln!("[INCOGNITO] Blocked save_conversation for {}", conversation.id);
+        eprintln!(
+            "[INCOGNITO] Blocked save_conversation for {}",
+            conversation.id
+        );
         return Ok(());
     }
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -767,7 +823,11 @@ pub fn save_conversation(app: AppHandle, conversation: Conversation, incognito: 
 }
 
 #[tauri::command]
-pub fn save_message(app: AppHandle, message: Message, incognito: Option<bool>) -> Result<(), String> {
+pub fn save_message(
+    app: AppHandle,
+    message: Message,
+    incognito: Option<bool>,
+) -> Result<(), String> {
     if incognito.unwrap_or(false) {
         eprintln!("[INCOGNITO] Blocked save_message for {}", message.id);
         return Ok(());
@@ -797,7 +857,10 @@ pub fn delete_conversation(app: AppHandle, conversation_id: String) -> Result<()
 
 #[tauri::command]
 pub async fn hard_delete_session(app: AppHandle, conversation_id: String) -> DeleteResult {
-    eprintln!("[HARD_DELETE] Attempting to delete conversation {}", conversation_id);
+    eprintln!(
+        "[HARD_DELETE] Attempting to delete conversation {}",
+        conversation_id
+    );
 
     let app_data_dir = match app.path().app_data_dir() {
         Ok(dir) => dir,
@@ -812,14 +875,20 @@ pub async fn hard_delete_session(app: AppHandle, conversation_id: String) -> Del
 
     match db::delete_conversation(&app_data_dir, &conversation_id) {
         Ok(_) => {
-            eprintln!("[HARD_DELETE] Conversation {} deleted from SQLite.", conversation_id);
+            eprintln!(
+                "[HARD_DELETE] Conversation {} deleted from SQLite.",
+                conversation_id
+            );
             DeleteResult {
                 success: true,
                 error: None,
             }
         }
         Err(e) => {
-            eprintln!("[HARD_DELETE] Failed to delete conversation {}: {}", conversation_id, e);
+            eprintln!(
+                "[HARD_DELETE] Failed to delete conversation {}: {}",
+                conversation_id, e
+            );
             DeleteResult {
                 success: false,
                 error: Some(e.to_string()),
@@ -830,11 +899,17 @@ pub async fn hard_delete_session(app: AppHandle, conversation_id: String) -> Del
 
 #[tauri::command]
 pub async fn delete_chat(app: AppHandle, chat_id: String, is_privacy_on: bool) -> DeleteResult {
-    eprintln!("[DELETE_CHAT] Request — chat_id=\"{}\", is_privacy_on={}", chat_id, is_privacy_on);
+    eprintln!(
+        "[DELETE_CHAT] Request — chat_id=\"{}\", is_privacy_on={}",
+        chat_id, is_privacy_on
+    );
 
     if is_privacy_on {
         // 👉 Privacy mode: wipe WebView partition — no disk I/O
-        eprintln!("[DELETE_CHAT] Privacy ON — clearing WebView storage partition for chat: {}", chat_id);
+        eprintln!(
+            "[DELETE_CHAT] Privacy ON — clearing WebView storage partition for chat: {}",
+            chat_id
+        );
         if let Some(window) = app.get_webview_window("main") {
             if let Err(e) = window.clear_all_browsing_data() {
                 eprintln!("[DELETE_CHAT] Failed to clear browsing data: {}", e);
@@ -844,14 +919,20 @@ pub async fn delete_chat(app: AppHandle, chat_id: String, is_privacy_on: bool) -
                 };
             }
         }
-        eprintln!("[DELETE_CHAT] Privacy chat memory partition wiped successfully for: {}", chat_id);
+        eprintln!(
+            "[DELETE_CHAT] Privacy chat memory partition wiped successfully for: {}",
+            chat_id
+        );
         DeleteResult {
             success: true,
             error: None,
         }
     } else {
         // 👉 Standard mode: delete from disk (SQLite)
-        eprintln!("[DELETE_CHAT] Standard mode — deleting chat from disk: {}", chat_id);
+        eprintln!(
+            "[DELETE_CHAT] Standard mode — deleting chat from disk: {}",
+            chat_id
+        );
         let app_data_dir = match app.path().app_data_dir() {
             Ok(dir) => dir,
             Err(e) => {
@@ -864,14 +945,20 @@ pub async fn delete_chat(app: AppHandle, chat_id: String, is_privacy_on: bool) -
         };
         match db::delete_conversation(&app_data_dir, &chat_id) {
             Ok(_) => {
-                eprintln!("[DELETE_CHAT] Standard chat {} removed from disk (SQLite).", chat_id);
+                eprintln!(
+                    "[DELETE_CHAT] Standard chat {} removed from disk (SQLite).",
+                    chat_id
+                );
                 DeleteResult {
                     success: true,
                     error: None,
                 }
             }
             Err(e) => {
-                eprintln!("[DELETE_CHAT] Failed to delete standard chat {}: {}", chat_id, e);
+                eprintln!(
+                    "[DELETE_CHAT] Failed to delete standard chat {}: {}",
+                    chat_id, e
+                );
                 DeleteResult {
                     success: false,
                     error: Some(format!("Target conversation not found on disk: {}", e)),
@@ -886,7 +973,9 @@ pub async fn wipe_incognito_session(app: AppHandle) -> Result<(), String> {
     eprintln!("[INCOGNITO] Wiping incognito session. Purging WebView storage.");
 
     if let Some(window) = app.get_webview_window("main") {
-        window.clear_all_browsing_data().map_err(|e| e.to_string())?;
+        window
+            .clear_all_browsing_data()
+            .map_err(|e| e.to_string())?;
     }
 
     crate::notifications::notify_success(
@@ -940,9 +1029,11 @@ pub async fn stream_chat(app: AppHandle, request: ChatStreamRequest) -> Result<(
     tauri::async_runtime::spawn(async move {
         let should_use_tools = agent::should_use_agent_loop(&app_for_stream, &request).await;
         let result = if should_use_tools {
-            agent::run_tool_loop_stream(app_for_stream.clone(), request, cancellation.child_token()).await
+            agent::run_tool_loop_stream(app_for_stream.clone(), request, cancellation.child_token())
+                .await
         } else {
-            run_stream_with_fallback(app_for_stream.clone(), request, cancellation.child_token()).await
+            run_stream_with_fallback(app_for_stream.clone(), request, cancellation.child_token())
+                .await
         };
 
         if let Err(error) = result {
@@ -1008,16 +1099,19 @@ pub async fn list_provider_models(request: ProviderRequest) -> Result<Vec<String
                 .await
                 .map_err(|e| e.to_string())
         }
-        "ollama" => {
-            fetch_ollama_models(request.base_url)
-                .await
-                .map_err(|e| e.to_string())
-        }
+        "ollama" => fetch_ollama_models(request.base_url)
+            .await
+            .map_err(|e| e.to_string()),
         "groq" | "together" => {
             let api_key = request
                 .api_key
                 .filter(|v| !v.trim().is_empty())
-                .ok_or_else(|| format!("Missing {} API key", provider_display_name(&request.provider)))?;
+                .ok_or_else(|| {
+                    format!(
+                        "Missing {} API key",
+                        provider_display_name(&request.provider)
+                    )
+                })?;
             fetch_openai_compatible_models(&api_key, request.base_url)
                 .await
                 .map_err(|e| e.to_string())
@@ -1027,7 +1121,9 @@ pub async fn list_provider_models(request: ProviderRequest) -> Result<Vec<String
 }
 
 #[tauri::command]
-pub async fn check_provider_health(request: ProviderRequest) -> Result<ProviderHealthResponse, String> {
+pub async fn check_provider_health(
+    request: ProviderRequest,
+) -> Result<ProviderHealthResponse, String> {
     let started = Instant::now();
 
     let response = match request.provider.as_str() {
@@ -1069,7 +1165,12 @@ pub async fn check_provider_health(request: ProviderRequest) -> Result<ProviderH
             let api_key = request
                 .api_key
                 .filter(|v| !v.trim().is_empty())
-                .ok_or_else(|| format!("Missing {} API key", provider_display_name(&request.provider)))?;
+                .ok_or_else(|| {
+                    format!(
+                        "Missing {} API key",
+                        provider_display_name(&request.provider)
+                    )
+                })?;
 
             let result = fetch_openai_compatible_models(&api_key, request.base_url)
                 .await
@@ -1132,7 +1233,11 @@ pub fn save_app_settings(app: AppHandle, data: String) -> Result<(), String> {
     let encoded = encrypt_config_v2(&data)?;
 
     std::fs::write(&config_path, &encoded).map_err(|e| e.to_string())?;
-    eprintln!("[CONFIG] Saved {} bytes to {:?}", encoded.len(), config_path);
+    eprintln!(
+        "[CONFIG] Saved {} bytes to {:?}",
+        encoded.len(),
+        config_path
+    );
     Ok(())
 }
 
@@ -1152,7 +1257,11 @@ pub fn load_app_settings(app: AppHandle) -> Result<String, String> {
     // Try V2 (XOR + Base64) first, then legacy (XOR + hex)
     match decrypt_config_v2(trimmed) {
         Ok(json_str) => {
-            eprintln!("[CONFIG] Loaded {} bytes from {:?}", json_str.len(), config_path);
+            eprintln!(
+                "[CONFIG] Loaded {} bytes from {:?}",
+                json_str.len(),
+                config_path
+            );
             return Ok(json_str);
         }
         Err(v2_err) => {
@@ -1164,7 +1273,11 @@ pub fn load_app_settings(app: AppHandle) -> Result<String, String> {
     let decoded_hex = decode_hex(trimmed)?;
     let decoded = xor_transform(&decoded_hex);
     let json_str = String::from_utf8(decoded).map_err(|e| e.to_string())?;
-    eprintln!("[CONFIG] Legacy-loaded {} bytes from {:?}", json_str.len(), config_path);
+    eprintln!(
+        "[CONFIG] Legacy-loaded {} bytes from {:?}",
+        json_str.len(),
+        config_path
+    );
 
     // Will be upgraded to V2 format on next save
     Ok(json_str)
@@ -1187,7 +1300,9 @@ pub async fn wipe_all_data(app: AppHandle) -> Result<(), String> {
 
     // 3. Clear WebView/Chromium storage (localStorage, IndexedDB, cookies, cache)
     if let Some(window) = app.get_webview_window("main") {
-        window.clear_all_browsing_data().map_err(|e| e.to_string())?;
+        window
+            .clear_all_browsing_data()
+            .map_err(|e| e.to_string())?;
     }
 
     // 4. Emit success toast to the renderer
@@ -1215,7 +1330,9 @@ pub async fn reset_database(app: AppHandle) -> Result<(), String> {
 
     // 3. Clear WebView storage (localStorage where Zustand persists chats)
     if let Some(window) = app.get_webview_window("main") {
-        window.clear_all_browsing_data().map_err(|e| e.to_string())?;
+        window
+            .clear_all_browsing_data()
+            .map_err(|e| e.to_string())?;
     }
 
     Ok(())
@@ -1243,8 +1360,13 @@ pub struct JarvisTaskRequest {
 
 #[tauri::command]
 pub async fn run_jarvis_task(app: AppHandle, request: JarvisTaskRequest) -> Result<String, String> {
-    eprintln!("[RUN_TASK] type={}, text.len()={}, provider={}, model={}",
-        request.task_type, request.text.len(), request.provider, request.model);
+    eprintln!(
+        "[RUN_TASK] type={}, text.len()={}, provider={}, model={}",
+        request.task_type,
+        request.text.len(),
+        request.provider,
+        request.model
+    );
 
     let system_prompt = match request.task_type.as_str() {
         "explain" => "You are JARVIS, an expert programming mentor. Explain the provided code in detail: describe what it does, how it works, key concepts involved, and any potential issues. Be thorough but clear, and use examples where helpful.",
@@ -1267,14 +1389,20 @@ pub async fn run_jarvis_task(app: AppHandle, request: JarvisTaskRequest) -> Resu
     if provider_config.provider == "ollama" {
         return run_jarvis_task_ollama(app, request, &provider_config, system_prompt).await;
     }
-    if provider_config.provider == "openai" || provider_config.provider == "groq" || provider_config.provider == "together" {
+    if provider_config.provider == "openai"
+        || provider_config.provider == "groq"
+        || provider_config.provider == "together"
+    {
         return run_jarvis_task_openai_compat(app, request, &provider_config, system_prompt).await;
     }
     if provider_config.provider == "claude" {
         return run_jarvis_task_claude(app, request, &provider_config, system_prompt).await;
     }
 
-    Err(format!("Unsupported provider: {}", provider_config.provider))
+    Err(format!(
+        "Unsupported provider: {}",
+        provider_config.provider
+    ))
 }
 
 async fn run_jarvis_task_ollama(
@@ -1283,13 +1411,19 @@ async fn run_jarvis_task_ollama(
     config: &ProviderConfig,
     system_prompt: &str,
 ) -> Result<String, String> {
-    let base_url = config.base_url.clone()
+    let base_url = config
+        .base_url
+        .clone()
         .filter(|v| !v.trim().is_empty())
         .unwrap_or_else(|| "http://localhost:11434".to_string());
     let url = format!("{}/api/chat", base_url.trim_end_matches('/'));
 
-    eprintln!("[RUN_TASK_OLLAMA] type={} model={} text.len={}",
-        request.task_type, config.model, request.text.len());
+    eprintln!(
+        "[RUN_TASK_OLLAMA] type={} model={} text.len={}",
+        request.task_type,
+        config.model,
+        request.text.len()
+    );
 
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(15))
@@ -1335,11 +1469,20 @@ async fn run_jarvis_task_openai_compat(
     config: &ProviderConfig,
     system_prompt: &str,
 ) -> Result<String, String> {
-    let api_key = config.api_key.as_ref()
+    let api_key = config
+        .api_key
+        .as_ref()
         .filter(|v| !v.trim().is_empty())
-        .ok_or_else(|| format!("Missing {} API key", provider_display_name(&config.provider)))?;
+        .ok_or_else(|| {
+            format!(
+                "Missing {} API key",
+                provider_display_name(&config.provider)
+            )
+        })?;
 
-    let url = config.base_url.clone()
+    let url = config
+        .base_url
+        .clone()
         .filter(|v| !v.trim().is_empty())
         .unwrap_or_else(|| "https://api.openai.com/v1/chat/completions".to_string());
 
@@ -1370,13 +1513,19 @@ async fn run_jarvis_task_openai_compat(
         .map_err(|e| format!("Request failed: {e}"))?;
 
     if !response.status().is_success() {
-        let error_text = response.text().await.unwrap_or_else(|_| "Unknown".to_string());
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown".to_string());
         return Err(parse_provider_error(&error_text));
     }
 
-    let raw_text = response.text().await.map_err(|e| format!("Failed to read response: {e}"))?;
-    let payload: Value = serde_json::from_str(&raw_text)
-        .map_err(|e| format!("Failed to parse response: {e}"))?;
+    let raw_text = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response: {e}"))?;
+    let payload: Value =
+        serde_json::from_str(&raw_text).map_err(|e| format!("Failed to parse response: {e}"))?;
 
     let content = payload
         .get("choices")
@@ -1398,11 +1547,15 @@ async fn run_jarvis_task_claude(
     config: &ProviderConfig,
     system_prompt: &str,
 ) -> Result<String, String> {
-    let api_key = config.api_key.as_ref()
+    let api_key = config
+        .api_key
+        .as_ref()
         .filter(|v| !v.trim().is_empty())
         .ok_or_else(|| "Missing Claude API key".to_string())?;
 
-    let url = config.base_url.clone()
+    let url = config
+        .base_url
+        .clone()
         .filter(|v| !v.trim().is_empty())
         .unwrap_or_else(|| "https://api.anthropic.com/v1/messages".to_string());
 
@@ -1433,13 +1586,19 @@ async fn run_jarvis_task_claude(
         .map_err(|e| format!("Request failed: {e}"))?;
 
     if !response.status().is_success() {
-        let error_text = response.text().await.unwrap_or_else(|_| "Unknown".to_string());
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown".to_string());
         return Err(parse_provider_error(&error_text));
     }
 
-    let raw_text = response.text().await.map_err(|e| format!("Failed to read response: {e}"))?;
-    let payload: Value = serde_json::from_str(&raw_text)
-        .map_err(|e| format!("Failed to parse response: {e}"))?;
+    let raw_text = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response: {e}"))?;
+    let payload: Value =
+        serde_json::from_str(&raw_text).map_err(|e| format!("Failed to parse response: {e}"))?;
 
     let content = payload
         .get("content")
@@ -1480,7 +1639,10 @@ fn builtin_themes() -> Vec<ThemeDefinition> {
                 ("--text-body", "#C9D1D9"),
                 ("--text-muted", "#8B949E"),
                 ("--border-color", "#30363D"),
-            ].into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
         },
         ThemeDefinition {
             id: "community-blue-neon".into(),
@@ -1494,7 +1656,10 @@ fn builtin_themes() -> Vec<ThemeDefinition> {
                 ("--text-body", "#CBD5E1"),
                 ("--text-muted", "#6B7280"),
                 ("--border-color", "#1E293B"),
-            ].into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
         },
     ]
 }
@@ -1526,7 +1691,8 @@ pub fn list_available_themes(app: AppHandle) -> Result<Vec<ThemeDefinition>, Str
         std::fs::write(
             &sample_path,
             serde_json::to_string_pretty(&sample).map_err(|e| e.to_string())?,
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
         eprintln!("[THEMES] Created sample theme at {:?}", sample_path);
     }
 
@@ -1535,17 +1701,15 @@ pub fn list_available_themes(app: AppHandle) -> Result<Vec<ThemeDefinition>, Str
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("json") {
                 match std::fs::read_to_string(&path) {
-                    Ok(content) => {
-                        match serde_json::from_str::<ThemeDefinition>(&content) {
-                            Ok(mut theme) => {
-                                theme.is_custom = true;
-                                themes.push(theme);
-                            }
-                            Err(e) => {
-                                eprintln!("[THEMES] Failed to parse {:?}: {}", path, e);
-                            }
+                    Ok(content) => match serde_json::from_str::<ThemeDefinition>(&content) {
+                        Ok(mut theme) => {
+                            theme.is_custom = true;
+                            themes.push(theme);
                         }
-                    }
+                        Err(e) => {
+                            eprintln!("[THEMES] Failed to parse {:?}: {}", path, e);
+                        }
+                    },
                     Err(e) => {
                         eprintln!("[THEMES] Failed to read {:?}: {}", path, e);
                     }
@@ -1554,6 +1718,11 @@ pub fn list_available_themes(app: AppHandle) -> Result<Vec<ThemeDefinition>, Str
         }
     }
 
-    eprintln!("[THEMES] Loaded {} themes ({} builtin + {} custom)", themes.len(), 2, themes.len().saturating_sub(2));
+    eprintln!(
+        "[THEMES] Loaded {} themes ({} builtin + {} custom)",
+        themes.len(),
+        2,
+        themes.len().saturating_sub(2)
+    );
     Ok(themes)
 }

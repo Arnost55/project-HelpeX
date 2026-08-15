@@ -51,7 +51,7 @@ pub fn init(app_data_dir: &PathBuf) -> Result<(), AppError> {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            "
+            ",
         )?;
         conn.pragma_update(None, "user_version", 1)?;
     }
@@ -63,8 +63,9 @@ pub fn init(app_data_dir: &PathBuf) -> Result<(), AppError> {
             ALTER TABLE conversations ADD COLUMN message_count INTEGER DEFAULT 0;
             ALTER TABLE messages ADD COLUMN model TEXT;
             ALTER TABLE messages ADD COLUMN tokens_est INTEGER DEFAULT 0;
-            "
-        ).ok();
+            ",
+        )
+        .ok();
 
         conn.execute(
             "
@@ -90,7 +91,7 @@ pub fn init(app_data_dir: &PathBuf) -> Result<(), AppError> {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            "
+            ",
         )?;
 
         conn.execute(
@@ -189,8 +190,14 @@ pub fn list_conversations(app_data_dir: &PathBuf) -> Result<Vec<Conversation>, A
 
 pub fn delete_conversation(app_data_dir: &PathBuf, conversation_id: &str) -> Result<(), AppError> {
     let conn = connect(app_data_dir)?;
-    conn.execute("DELETE FROM messages WHERE conversation_id = ?1", params![conversation_id])?;
-    conn.execute("DELETE FROM conversations WHERE id = ?1", params![conversation_id])?;
+    conn.execute(
+        "DELETE FROM messages WHERE conversation_id = ?1",
+        params![conversation_id],
+    )?;
+    conn.execute(
+        "DELETE FROM conversations WHERE id = ?1",
+        params![conversation_id],
+    )?;
     conn.close().ok();
     Ok(())
 }
@@ -201,12 +208,15 @@ pub fn wipe_all(app_data_dir: &PathBuf) -> Result<(), AppError> {
         "
         DELETE FROM messages;
         DELETE FROM conversations;
-        "
+        ",
     )?;
     Ok(())
 }
 
-pub fn list_messages(app_data_dir: &PathBuf, conversation_id: String) -> Result<Vec<Message>, AppError> {
+pub fn list_messages(
+    app_data_dir: &PathBuf,
+    conversation_id: String,
+) -> Result<Vec<Message>, AppError> {
     let conn = connect(app_data_dir)?;
     let mut stmt = conn.prepare(
         "
@@ -281,8 +291,6 @@ pub fn load_user_profile(app_data_dir: &PathBuf) -> Result<Option<UserProfile>, 
     Ok(None)
 }
 
-
-
 pub fn reset_database(app_data_dir: &PathBuf) -> Result<(), AppError> {
     let db_path = get_db_path(app_data_dir)?;
     let cfg = app_data_dir.join("config.json");
@@ -294,4 +302,3 @@ pub fn reset_database(app_data_dir: &PathBuf) -> Result<(), AppError> {
     }
     Ok(())
 }
-

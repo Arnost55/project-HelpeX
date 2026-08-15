@@ -5,6 +5,9 @@ pub enum AppError {
     #[error("database error: {0}")]
     Database(String),
 
+    #[error("cancelled")]
+    Cancelled,
+
     #[error("network error: {0}")]
     Network(String),
 

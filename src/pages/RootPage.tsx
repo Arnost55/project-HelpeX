@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
 import CommandPalette from "../components/CommandPalette";
 import AppShell from "../components/layout/AppShell";
 import ActivityFeed from "../components/dashboard/ActivityFeed";
@@ -34,8 +33,9 @@ import { formatDurationFromMs } from "../utils/formatting";
 type SettingsTab = "ai" | "integration" | "appearance" | "system";
 
 interface ApprovalEvent {
-  requestId: string;
+  approvalId: string;
   streamId?: string | null;
+  providerToolName?: string | null;
   serverName: string;
   toolName: string;
   arguments: unknown;
@@ -44,6 +44,24 @@ interface ApprovalEvent {
     decision: string;
     source: string;
   };
+  riskLevel: string;
+  actionLabel: string;
+  description?: string | null;
+  requestOrigin: string;
+  capability: {
+    action: string;
+    target: string;
+  };
+  scope: {
+    kind: string;
+    identifier: string;
+  };
+  requestedAtMs: number;
+  expiresAtMs: number;
+}
+
+interface ApprovalResolvedEvent {
+  approvalId: string;
 }
 
 interface AgentToolEvent {
@@ -145,6 +163,7 @@ export default function RootPage(): JSX.Element {
     let disposed = false;
     let unlistenToggle: (() => void) | undefined;
     let unlistenApproval: (() => void) | undefined;
+    let unlistenApprovalResolved: (() => void) | undefined;
     let unlistenToolResult: (() => void) | undefined;
     let unlistenToolError: (() => void) | undefined;
 
@@ -155,14 +174,26 @@ export default function RootPage(): JSX.Element {
 
       unlistenApproval = await listen<ApprovalEvent>("agent-tool-approval-request", (event) => {
         upsertPendingApproval({
-          requestId: event.payload.requestId,
+          approvalId: event.payload.approvalId,
           streamId: event.payload.streamId,
+          providerToolName: event.payload.providerToolName,
           serverName: event.payload.serverName,
           toolName: event.payload.toolName,
           arguments: event.payload.arguments,
           permission: event.payload.permission,
-          requestedAt: new Date().toISOString(),
+          riskLevel: event.payload.riskLevel,
+          actionLabel: event.payload.actionLabel,
+          description: event.payload.description,
+          requestOrigin: event.payload.requestOrigin,
+          capability: event.payload.capability,
+          scope: event.payload.scope,
+          requestedAtMs: event.payload.requestedAtMs,
+          expiresAtMs: event.payload.expiresAtMs,
         });
+      });
+
+      unlistenApprovalResolved = await listen<ApprovalResolvedEvent>("agent-tool-approval-resolved", (event) => {
+        useToolApprovalStore.getState().removePending(event.payload.approvalId);
       });
 
       const clearFromEvent = (event: { payload: AgentToolEvent }) => {
@@ -184,6 +215,7 @@ export default function RootPage(): JSX.Element {
       if (disposed) {
         unlistenToggle?.();
         unlistenApproval?.();
+        unlistenApprovalResolved?.();
         unlistenToolResult?.();
         unlistenToolError?.();
       }
@@ -201,12 +233,6 @@ export default function RootPage(): JSX.Element {
         });
       } else {
         document.documentElement.setAttribute("data-theme", themeObject.id);
-      }
-
-      try {
-        await invoke("save_config", { activeTheme: themeObject.id });
-      } catch (error) {
-        console.error("Failed to commit theme:", error);
       }
     },
     [setTheme],

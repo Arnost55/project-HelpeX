@@ -7,12 +7,17 @@ use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
+use crate::agent::cancellation::StreamCancellationToken;
+
 use super::protocol::{JsonRpcError, JsonRpcRequest, JsonRpcResponse};
 
 type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, McpClientError>>>>>;
 
 #[derive(Debug, Clone)]
 pub enum McpClientError {
+    Cancelled {
+        message: String,
+    },
     Timeout {
         message: String,
     },
@@ -34,7 +39,8 @@ pub enum McpClientError {
 impl std::fmt::Display for McpClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            McpClientError::Timeout { message }
+            McpClientError::Cancelled { message }
+            | McpClientError::Timeout { message }
             | McpClientError::Disconnected { message }
             | McpClientError::JsonRpc { message, .. }
             | McpClientError::MalformedResponse { message, .. }
@@ -79,6 +85,16 @@ impl McpClient {
         params: Value,
         timeout_ms: u64,
     ) -> Result<Value, McpClientError> {
+        self.request_with_cancel(method, params, timeout_ms, None).await
+    }
+
+    pub async fn request_with_cancel(
+        &self,
+        method: &str,
+        params: Value,
+        timeout_ms: u64,
+        cancellation: Option<StreamCancellationToken>,
+    ) -> Result<Value, McpClientError> {
         if self.closed.load(Ordering::SeqCst) {
             return Err(McpClientError::Disconnected {
                 message: format!("MCP client '{}' is closed", self.server_name),
@@ -106,22 +122,44 @@ impl McpClient {
             )));
         }
 
-        match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), rx).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(McpClientError::Disconnected {
-                message: format!(
-                    "Server '{}' disconnected before replying to '{}'",
-                    self.server_name, method
-                ),
-            }),
-            Err(_) => {
-                let _ = self.pending.lock().await.remove(&id);
-                Err(McpClientError::Timeout {
-                    message: format!(
-                        "Timed out waiting for '{}.{}' response",
-                        self.server_name, method
-                    ),
-                })
+        let mut timeout = tokio::time::sleep(std::time::Duration::from_millis(timeout_ms));
+        tokio::pin!(timeout);
+
+        if let Some(token) = cancellation {
+            let mut cancel_wait = token.child_token();
+            tokio::select! {
+                _ = cancel_wait.cancelled() => {
+                    let _ = self.pending.lock().await.remove(&id);
+                    Err(McpClientError::Cancelled {
+                        message: format!(
+                            "Cancelled while waiting for '{}.{}' response",
+                            self.server_name, method
+                        ),
+                    })
+                }
+                result = rx => self.map_pending_response(result, method),
+                _ = &mut timeout => {
+                    let _ = self.pending.lock().await.remove(&id);
+                    Err(McpClientError::Timeout {
+                        message: format!(
+                            "Timed out waiting for '{}.{}' response",
+                            self.server_name, method
+                        ),
+                    })
+                }
+            }
+        } else {
+            tokio::select! {
+                result = rx => self.map_pending_response(result, method),
+                _ = &mut timeout => {
+                    let _ = self.pending.lock().await.remove(&id);
+                    Err(McpClientError::Timeout {
+                        message: format!(
+                            "Timed out waiting for '{}.{}' response",
+                            self.server_name, method
+                        ),
+                    })
+                }
             }
         }
     }
@@ -161,6 +199,24 @@ impl McpClient {
             let _ = tx.send(Err(McpClientError::Disconnected {
                 message: format!("MCP client '{}' closed", self.server_name),
             }));
+        }
+    }
+}
+
+impl McpClient {
+    fn map_pending_response(
+        &self,
+        result: Result<Result<Value, McpClientError>, oneshot::error::RecvError>,
+        method: &str,
+    ) -> Result<Value, McpClientError> {
+        match result {
+            Ok(result) => result,
+            Err(_) => Err(McpClientError::Disconnected {
+                message: format!(
+                    "Server '{}' disconnected before replying to '{}'",
+                    self.server_name, method
+                ),
+            }),
         }
     }
 }
@@ -311,6 +367,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     use tokio::io::{duplex, AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
+    use crate::agent::cancellation::StreamCancellationRegistry;
 
     async fn read_request<R>(reader: &mut BufReader<R>) -> JsonRpcRequest
     where
@@ -511,5 +568,43 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(error, McpClientError::Disconnected { .. }));
+    }
+
+    #[tokio::test]
+    async fn cancels_pending_request_and_ignores_late_response() {
+        let (client_side, server_side) = duplex(4096);
+        let (client_reader, client_writer) = tokio::io::split(client_side);
+        let (server_reader, mut server_writer) = tokio::io::split(server_side);
+        let client = McpClient::new("mock".to_string(), client_writer, client_reader);
+        let registry = StreamCancellationRegistry::default();
+        let token = registry.register("stream-1").await;
+
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(server_reader);
+            let request = read_request(&mut reader).await;
+            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+            server_writer
+                .write_all(
+                    format!(
+                        "{{\"jsonrpc\":\"2.0\",\"id\":{},\"result\":{{\"value\":\"late\"}}}}\n",
+                        request.id.unwrap()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+        });
+
+        let cancel_registry = registry;
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            cancel_registry.cancel("stream-1").await;
+        });
+
+        let error = client
+            .request_with_cancel("late", json!({}), 1_000, Some(token))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, McpClientError::Cancelled { .. }));
     }
 }

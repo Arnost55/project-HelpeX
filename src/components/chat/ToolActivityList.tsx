@@ -13,7 +13,7 @@ interface ToolActivityListProps {
   activities: ToolActivityItem[];
   approvals: ToolApprovalRequest[];
   approvalBusyId?: string | null;
-  onApprovalDecision: (requestId: string, allow: boolean) => Promise<void>;
+  onApprovalDecision: (approvalId: string, allow: boolean) => Promise<void>;
 }
 
 const STATUS_ICON = {
@@ -42,9 +42,9 @@ export default function ToolActivityList({
     <div className="space-y-3">
       {approvals.map((approval) => (
         <ToolApprovalCard
-          key={approval.requestId}
+          key={approval.approvalId}
           approval={approval}
-          busy={approvalBusyId === approval.requestId}
+          busy={approvalBusyId === approval.approvalId}
           onDecision={onApprovalDecision}
         />
       ))}

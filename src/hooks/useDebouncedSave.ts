@@ -14,7 +14,7 @@ export function useDebouncedSave(delayMs = 600) {
     if (!payload) return;
     pendingRef.current = null;
     try {
-      await invoke("save_config", payload as Record<string, unknown>);
+      await invoke("save_app_settings", { data: JSON.stringify(payload) });
     } catch {
       // silent — persistence must never block the UI
     }

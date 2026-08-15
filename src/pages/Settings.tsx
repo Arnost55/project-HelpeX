@@ -4,7 +4,6 @@ import { PlusCircleIcon, X } from "lucide-react";
 import { useSettingsStore } from "../store/settingsStore";
 import { checkProviderHealth, listProviderModels } from "../api/providers";
 import { getAvailableThemes, type ThemeDefinition } from "../api/settingsApi";
-import { useDebouncedSave } from "../hooks/useDebouncedSave";
 import { McpControlCenter } from "../components/McpControlCenter";
 import { CyberInput, CyberSelect, CyberToggle, CyberSlider } from "../components/ui";
 import { restartApplication } from "../utils/basicFunc";
@@ -123,7 +122,6 @@ export default function Settings({ isOpen, onClose, activeTab, onTabChange, onTh
   const [codeFont, setCodeFont] = useState("Fira Code");
   const [availableThemes, setAvailableThemes] = useState<ThemeDefinition[]>([]);
 
-  const { schedule } = useDebouncedSave(600);
   const prevValues = useRef({ provider, model, theme, temperature, maxTokens });
 
   useEffect(() => {
@@ -141,18 +139,8 @@ export default function Settings({ isOpen, onClose, activeTab, onTabChange, onTh
   }, [isOpen]);
 
   useEffect(() => {
-    const p = prevValues.current;
-    if (
-      p.provider !== provider ||
-      p.model !== model ||
-      p.theme !== theme ||
-      p.temperature !== temperature ||
-      p.maxTokens !== maxTokens
-    ) {
-      schedule({ provider, model, activeTheme: theme, temperature, maxTokens });
-      prevValues.current = { provider, model, theme, temperature, maxTokens };
-    }
-  }, [provider, model, theme, temperature, maxTokens, schedule]);
+    prevValues.current = { provider, model, theme, temperature, maxTokens };
+  }, [provider, model, theme, temperature, maxTokens]);
 
   useEffect(() => {
     handleHealthCheck();

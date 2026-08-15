@@ -110,7 +110,6 @@ export default function ChatPanel({
   const [toolActivities, setToolActivities] = useState<ToolActivityItem[]>([]);
   const [busyApprovalId, setBusyApprovalId] = useState<string | null>(null);
   const pendingApprovals = useToolApprovalStore((state) => state.pending);
-  const removePendingApproval = useToolApprovalStore((state) => state.removePending);
   const clearApprovalForTool = useToolApprovalStore((state) => state.clearForTool);
   const { activeServers, respondToPermissionRequest } = useMcp();
 
@@ -228,11 +227,10 @@ export default function ChatPanel({
     void invoke("cancel_chat_stream", { stream_id: activeStreamId });
   }
 
-  async function handleApprovalDecision(requestId: string, allow: boolean): Promise<void> {
+  async function handleApprovalDecision(approvalId: string, allow: boolean): Promise<void> {
     try {
-      setBusyApprovalId(requestId);
-      await respondToPermissionRequest(requestId, allow);
-      removePendingApproval(requestId);
+      setBusyApprovalId(approvalId);
+      await respondToPermissionRequest(approvalId, allow);
     } catch (approvalError) {
       const message = approvalError instanceof Error ? approvalError.message : "Approval update failed";
       setError(message);
@@ -371,7 +369,7 @@ export default function ChatPanel({
             const next = current.filter((item) => item.key !== key);
             next.push({
               key,
-              label: `Running ${event.payload.toolName} on ${event.payload.serverName}`,
+              label: `${event.payload.toolName} on ${event.payload.serverName}`,
               status: "running",
             });
             return next;
@@ -386,7 +384,7 @@ export default function ChatPanel({
             const next = current.filter((item) => item.key !== key);
             next.push({
               key,
-              label: `Completed ${event.payload.toolName}`,
+              label: `${event.payload.toolName} completed`,
               status: "success",
               summary: event.payload.summary ?? undefined,
             });
@@ -402,7 +400,7 @@ export default function ChatPanel({
             const next = current.filter((item) => item.key !== key);
             next.push({
               key,
-              label: `Blocked ${event.payload.toolName}`,
+              label: `${event.payload.toolName} blocked`,
               status: "error",
               summary: event.payload.summary ?? undefined,
             });

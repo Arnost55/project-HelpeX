@@ -1,10 +1,11 @@
 import { ShieldAlert } from "lucide-react";
 import type { ToolApprovalRequest } from "../../store/toolApprovalStore";
+import { formatClockTime } from "../../utils/formatting";
 
 interface ToolApprovalCardProps {
   approval: ToolApprovalRequest;
   busy: boolean;
-  onDecision: (requestId: string, allow: boolean) => Promise<void>;
+  onDecision: (approvalId: string, allow: boolean) => Promise<void>;
 }
 
 export default function ToolApprovalCard({
@@ -12,6 +13,8 @@ export default function ToolApprovalCard({
   busy,
   onDecision,
 }: ToolApprovalCardProps): JSX.Element {
+  const requestedAt = new Date(approval.requestedAtMs).toISOString();
+  const expiresAt = new Date(approval.expiresAtMs).toISOString();
   return (
     <article
       className="rounded-2xl border p-4"
@@ -26,17 +29,47 @@ export default function ToolApprovalCard({
         </div>
         <div>
           <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-            HelpeX wants to execute
+            HelpeX wants to perform an action
           </p>
           <p className="mt-1 text-base font-medium" style={{ color: "var(--text-primary)" }}>
-            {approval.toolName}
+            {approval.actionLabel}
           </p>
           <p className="mt-1 text-sm" style={{ color: "var(--text-secondary)" }}>
-            MCP Server: {approval.serverName}
+            Source: {approval.serverName}
           </p>
           <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
             Permission: {approval.permission.level}
           </p>
+          <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+            Risk: {approval.riskLevel}
+          </p>
+        </div>
+      </div>
+      {approval.description ? (
+        <p className="mb-3 text-sm" style={{ color: "var(--text-secondary)" }}>
+          {approval.description}
+        </p>
+      ) : null}
+      <div className="mb-3 grid gap-2 rounded-xl border px-3 py-3 text-sm" style={{ borderColor: "var(--border-subtle)", backgroundColor: "rgba(255,255,255,0.02)" }}>
+        <div className="flex items-center justify-between gap-3">
+          <span style={{ color: "var(--text-muted)" }}>Action</span>
+          <span style={{ color: "var(--text-primary)" }}>{approval.capability.action}</span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span style={{ color: "var(--text-muted)" }}>Target</span>
+          <span style={{ color: "var(--text-primary)" }}>{approval.capability.target}</span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span style={{ color: "var(--text-muted)" }}>Scope</span>
+          <span style={{ color: "var(--text-primary)" }}>{approval.scope.identifier}</span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span style={{ color: "var(--text-muted)" }}>Requested</span>
+          <span style={{ color: "var(--text-primary)" }}>{formatClockTime(requestedAt)}</span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span style={{ color: "var(--text-muted)" }}>Expires</span>
+          <span style={{ color: "var(--text-primary)" }}>{formatClockTime(expiresAt)}</span>
         </div>
       </div>
       <pre
@@ -48,7 +81,7 @@ export default function ToolApprovalCard({
       <div className="flex items-center justify-end gap-2">
         <button
           type="button"
-          onClick={() => void onDecision(approval.requestId, false)}
+          onClick={() => void onDecision(approval.approvalId, false)}
           disabled={busy}
           className="rounded-xl border px-3 py-2 text-sm"
           style={{ borderColor: "var(--border-panel)", color: "var(--text-secondary)" }}
@@ -57,7 +90,7 @@ export default function ToolApprovalCard({
         </button>
         <button
           type="button"
-          onClick={() => void onDecision(approval.requestId, true)}
+          onClick={() => void onDecision(approval.approvalId, true)}
           disabled={busy}
           className="rounded-xl px-3 py-2 text-sm font-medium"
           style={{ backgroundColor: "var(--accent-soft)", color: "var(--accent-primary)" }}

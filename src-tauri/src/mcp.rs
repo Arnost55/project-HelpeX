@@ -1,4 +1,5 @@
 mod audit;
+pub mod authorization;
 mod client;
 mod permissions;
 mod protocol;
@@ -6,15 +7,17 @@ mod schema;
 
 use std::collections::HashMap;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use audit::{log_tool_audit, redact_json_value, summarize_json_value, ToolAuditEntry};
+use authorization::{
+    authorize_request, build_action_context, ActionContext, AuthorizationDecision, RequestAuthority,
+    RequestOrigin,
+};
 use client::{McpClient, McpClientError};
 use permissions::{
-    evaluate_permission, load_permission_policy, PermissionDecision, PermissionEvaluation,
+    load_permission_policy, PermissionDecision, PermissionEvaluation, PermissionLevel,
 };
 pub use protocol::McpTool;
 use protocol::{extract_tools_from_list_result, parse_tool_call_is_error};
@@ -25,6 +28,9 @@ use tauri::{AppHandle, Manager, State};
 use tokio::io::AsyncBufReadExt;
 use tokio::process::{Child, ChildStderr, Command};
 use tokio::sync::{oneshot, Mutex, RwLock};
+use uuid::Uuid;
+
+use crate::agent::cancellation::StreamCancellationToken;
 
 const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 const MCP_INIT_TIMEOUT_MS: u64 = 15_000;
@@ -43,11 +49,12 @@ pub struct ActiveServer {
 pub struct McpSystemState {
     pub servers: Arc<RwLock<HashMap<String, Arc<ActiveServer>>>>,
     pub pending_approvals: Arc<Mutex<HashMap<String, PendingApproval>>>,
-    pub approval_sequence: AtomicU64,
 }
 
 pub struct PendingApproval {
-    pub response_tx: oneshot::Sender<bool>,
+    pub snapshot: PendingApprovalSnapshot,
+    pub frozen_request: ToolExecutionRequest,
+    pub response_tx: oneshot::Sender<ApprovalResolution>,
 }
 
 impl Default for McpSystemState {
@@ -55,7 +62,6 @@ impl Default for McpSystemState {
         Self {
             servers: Arc::new(RwLock::new(HashMap::new())),
             pending_approvals: Arc::new(Mutex::new(HashMap::new())),
-            approval_sequence: AtomicU64::new(0),
         }
     }
 }
@@ -66,6 +72,10 @@ pub struct ToolExecutionRequest {
     pub tool_name: String,
     pub arguments: Value,
     pub stream_id: Option<String>,
+    pub approval_id: Option<String>,
+    pub tool_alias: Option<String>,
+    pub tool_description: Option<String>,
+    pub action_context: ActionContext,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -77,18 +87,99 @@ pub struct ToolExecutionOutcome {
     pub is_error: bool,
     pub duration_ms: u128,
     pub result_summary: String,
-    pub permission: PermissionEvaluation,
+    pub authorization: AuthorizationDecision,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolApprovalRequestEvent {
-    pub request_id: String,
+    pub approval_id: String,
     pub stream_id: Option<String>,
+    pub provider_tool_name: Option<String>,
     pub server_name: String,
     pub tool_name: String,
     pub arguments: Value,
     pub permission: PermissionEvaluation,
+    pub risk_level: ApprovalRiskLevel,
+    pub action_label: String,
+    pub description: Option<String>,
+    pub requested_at_ms: u64,
+    pub expires_at_ms: u64,
+    pub request_origin: RequestOrigin,
+    pub capability: CapabilitySummary,
+    pub scope: ResourceScopeSummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolApprovalResolvedEvent {
+    pub approval_id: String,
+    pub stream_id: Option<String>,
+    pub server_name: String,
+    pub tool_name: String,
+    pub status: ApprovalStatus,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ApprovalRiskLevel {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ApprovalStatus {
+    Approved,
+    Denied,
+    Expired,
+    Cancelled,
+    Invalidated,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingApprovalSnapshot {
+    pub id: String,
+    pub stream_id: Option<String>,
+    pub server_name: String,
+    pub tool_name: String,
+    pub provider_tool_name: Option<String>,
+    pub arguments: Value,
+    pub permission: PermissionEvaluation,
+    pub description: Option<String>,
+    pub action_label: String,
+    pub requested_at_ms: u64,
+    pub expires_at_ms: u64,
+    pub risk_level: ApprovalRiskLevel,
+    pub request_origin: RequestOrigin,
+    pub capability: CapabilitySummary,
+    pub scope: ResourceScopeSummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilitySummary {
+    pub action: String,
+    pub target: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceScopeSummary {
+    pub kind: String,
+    pub identifier: String,
+}
+
+#[derive(Debug, Clone)]
+enum ApprovalResolution {
+    AllowOnce,
+    Deny,
+    Expired,
+    Cancelled,
+    Invalidated,
 }
 
 #[derive(Debug, Clone)]
@@ -98,6 +189,10 @@ pub enum ToolExecutionErrorKind {
     InvalidArguments,
     PermissionDenied,
     PermissionRequired,
+    ApprovalExpired,
+    ApprovalRejected,
+    ApprovalInvalidated,
+    Cancelled,
     Timeout,
     Disconnected,
     JsonRpc,
@@ -139,6 +234,10 @@ impl ToolExecutionError {
             ToolExecutionErrorKind::InvalidArguments => "invalid_arguments",
             ToolExecutionErrorKind::PermissionDenied => "permission_denied",
             ToolExecutionErrorKind::PermissionRequired => "permission_required",
+            ToolExecutionErrorKind::ApprovalExpired => "approval_expired",
+            ToolExecutionErrorKind::ApprovalRejected => "approval_denied",
+            ToolExecutionErrorKind::ApprovalInvalidated => "approval_invalidated",
+            ToolExecutionErrorKind::Cancelled => "cancelled",
             ToolExecutionErrorKind::Timeout => "timeout",
             ToolExecutionErrorKind::Disconnected => "disconnected",
             ToolExecutionErrorKind::JsonRpc => "jsonrpc_error",
@@ -392,6 +491,9 @@ async fn spawn_and_register_server(
 
 fn map_client_error(error: McpClientError) -> ToolExecutionError {
     match error {
+        McpClientError::Cancelled { message } => {
+            ToolExecutionError::new(ToolExecutionErrorKind::Cancelled, message)
+        }
         McpClientError::Timeout { message } => {
             ToolExecutionError::new(ToolExecutionErrorKind::Timeout, message)
         }
@@ -417,7 +519,8 @@ fn map_client_error(error: McpClientError) -> ToolExecutionError {
 
 pub async fn execute_tool(
     app_handle: &AppHandle,
-    request: ToolExecutionRequest,
+    mut request: ToolExecutionRequest,
+    cancellation: Option<StreamCancellationToken>,
 ) -> Result<ToolExecutionOutcome, ToolExecutionError> {
     let state = app_handle.state::<McpSystemState>();
     let server = get_active_server(&state, &request.server_name)
@@ -461,53 +564,62 @@ pub async fn execute_tool(
             format!("Failed to load MCP permission policy: {}", error),
         )
     })?;
-    let permission = evaluate_permission(&policy, &request.server_name, &tool);
+    let authorization =
+        authorize_request(&policy, &request.server_name, &tool, request.action_context.clone());
 
-    if permission.decision == PermissionDecision::Ask {
+    if authorization.decision == PermissionDecision::Ask {
         let state = app_handle.state::<McpSystemState>();
-        let approved = request_tool_approval(app_handle, &state, &request, &permission).await?;
-        if !approved {
-            let error = ToolExecutionError::new(
-                ToolExecutionErrorKind::PermissionDenied,
-                format!(
-                    "User denied approval for '{}.{}' ({:?})",
-                    request.server_name, request.tool_name, permission.level
-                ),
-            )
-            .with_permission(permission.clone());
-
-            let audit_entry = ToolAuditEntry::from_denied_request(&request, &permission, &error);
-            let _ = log_tool_audit(app_handle, &audit_entry).await;
-            return Err(error);
-        }
-    } else if permission.decision != PermissionDecision::Allow {
+        request_tool_approval(
+            app_handle,
+            &state,
+            &mut request,
+            &authorization,
+            cancellation.clone(),
+        )
+        .await?;
+    } else if authorization.decision != PermissionDecision::Allow {
         let error = ToolExecutionError::new(
             ToolExecutionErrorKind::PermissionDenied,
             format!(
                 "Permission {:?} for '{}.{}' ({:?})",
-                permission.decision, request.server_name, request.tool_name, permission.level
+                authorization.decision,
+                request.server_name,
+                request.tool_name,
+                authorization.level
             ),
         )
-        .with_permission(permission.clone());
+        .with_permission(authorization.permission.clone());
 
-        let audit_entry = ToolAuditEntry::from_denied_request(&request, &permission, &error);
+        let audit_entry = ToolAuditEntry::from_denied_request(&request, &authorization, &error);
         let _ = log_tool_audit(app_handle, &audit_entry).await;
         return Err(error);
     }
 
+    if let Some(token) = cancellation.as_ref() {
+        if token.is_cancelled() {
+            let error = ToolExecutionError::new(
+                ToolExecutionErrorKind::Cancelled,
+                format!("Tool execution cancelled before '{}.{}' ran", request.server_name, request.tool_name),
+            )
+            .with_permission(authorization.permission.clone());
+            let audit_entry = ToolAuditEntry::from_cancelled_request(&request, &authorization, &error);
+            let _ = log_tool_audit(app_handle, &audit_entry).await;
+            return Err(error);
+        }
+    }
+
     let started = Instant::now();
-    let response = server
-        .client
-        .request(
-            "tools/call",
-            json!({
-                "name": request.tool_name,
-                "arguments": request.arguments
-            }),
-            MCP_TOOL_CALL_TIMEOUT_MS,
-        )
-        .await
-        .map_err(map_client_error)?;
+    let response = server.client.request_with_cancel(
+        "tools/call",
+        json!({
+            "name": request.tool_name.clone(),
+            "arguments": request.arguments.clone()
+        }),
+        MCP_TOOL_CALL_TIMEOUT_MS,
+        cancellation.clone(),
+    )
+    .await
+    .map_err(map_client_error)?;
 
     let duration_ms = started.elapsed().as_millis();
     let is_error = parse_tool_call_is_error(&response);
@@ -520,7 +632,7 @@ pub async fn execute_tool(
         is_error,
         duration_ms,
         result_summary: result_summary.clone(),
-        permission: permission.clone(),
+        authorization: authorization.clone(),
     };
 
     let audit_entry = ToolAuditEntry::from_outcome(&request, &outcome);
@@ -572,7 +684,24 @@ pub async fn mcp_execute_tool(
             tool_name,
             arguments,
             stream_id: None,
+            approval_id: None,
+            tool_alias: None,
+            tool_description: None,
+            action_context: ActionContext {
+                origin: RequestOrigin::DirectUser,
+                authority: RequestAuthority::DirectUserInstruction,
+                capability: authorization::CapabilityDescriptor {
+                    action: "manual.tool_call".to_string(),
+                    target: "manual".to_string(),
+                },
+                scope: authorization::ResourceScope {
+                    kind: "tool".to_string(),
+                    identifier: "manual".to_string(),
+                },
+                provider_tool_name: None,
+            },
         },
+        None,
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -592,6 +721,8 @@ pub async fn mcp_disconnect_server(app_handle: AppHandle, name: String) -> Resul
     let Some(server) = server else {
         return Err(format!("No active MCP server named '{}'", name));
     };
+
+    invalidate_approvals_for_server(&app_handle, &state, &name).await;
 
     server.client.close().await;
 
@@ -716,34 +847,144 @@ pub fn redacted_arguments(value: &Value) -> Value {
     redact_json_value(value)
 }
 
-fn next_approval_request_id(state: &McpSystemState) -> String {
-    let sequence = state.approval_sequence.fetch_add(1, Ordering::Relaxed) + 1;
-    format!("approval_{}", sequence)
+fn next_approval_request_id() -> String {
+    Uuid::new_v4().to_string()
+}
+
+fn now_timestamp_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn risk_level_for_permission(level: PermissionLevel) -> ApprovalRiskLevel {
+    match level {
+        PermissionLevel::Read => ApprovalRiskLevel::Low,
+        PermissionLevel::Unknown => ApprovalRiskLevel::Medium,
+        PermissionLevel::Write => ApprovalRiskLevel::High,
+        PermissionLevel::Execute => ApprovalRiskLevel::High,
+        PermissionLevel::Sensitive => ApprovalRiskLevel::Critical,
+    }
+}
+
+fn approval_action_label(request: &ToolExecutionRequest) -> String {
+    request
+        .tool_description
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| request.tool_name.clone())
+}
+
+fn build_approval_snapshot(
+    request_id: String,
+    request: &ToolExecutionRequest,
+    authorization: &AuthorizationDecision,
+) -> PendingApprovalSnapshot {
+    let requested_at_ms = now_timestamp_ms();
+    PendingApprovalSnapshot {
+        id: request_id,
+        stream_id: request.stream_id.clone(),
+        server_name: request.server_name.clone(),
+        tool_name: request.tool_name.clone(),
+        provider_tool_name: request.tool_alias.clone(),
+        arguments: redacted_arguments(&request.arguments),
+        permission: authorization.permission.clone(),
+        description: request.tool_description.clone(),
+        action_label: approval_action_label(request),
+        requested_at_ms,
+        expires_at_ms: requested_at_ms + 300_000,
+        risk_level: risk_level_for_permission(authorization.level),
+        request_origin: request.action_context.origin.clone(),
+        capability: CapabilitySummary {
+            action: request.action_context.capability.action.clone(),
+            target: request.action_context.capability.target.clone(),
+        },
+        scope: ResourceScopeSummary {
+            kind: request.action_context.scope.kind.clone(),
+            identifier: request.action_context.scope.identifier.clone(),
+        },
+    }
+}
+
+fn emit_approval_resolved(app_handle: &AppHandle, approval: &PendingApprovalSnapshot, status: ApprovalStatus) {
+    let _ = app_handle.emit(
+        "agent-tool-approval-resolved",
+        ToolApprovalResolvedEvent {
+            approval_id: approval.id.clone(),
+            stream_id: approval.stream_id.clone(),
+            server_name: approval.server_name.clone(),
+            tool_name: approval.tool_name.clone(),
+            status,
+        },
+    );
+}
+
+async fn invalidate_approvals_for_server(
+    app_handle: &AppHandle,
+    state: &McpSystemState,
+    server_name: &str,
+) {
+    let approvals = {
+        let mut pending = state.pending_approvals.lock().await;
+        let ids = pending
+            .iter()
+            .filter(|(_, approval)| approval.snapshot.server_name == server_name)
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        ids.into_iter()
+            .filter_map(|id| pending.remove(&id))
+            .collect::<Vec<_>>()
+    };
+
+    for approval in approvals {
+        emit_approval_resolved(app_handle, &approval.snapshot, ApprovalStatus::Invalidated);
+        let _ = approval.response_tx.send(ApprovalResolution::Invalidated);
+    }
 }
 
 async fn request_tool_approval(
     app_handle: &AppHandle,
     state: &McpSystemState,
-    request: &ToolExecutionRequest,
-    permission: &PermissionEvaluation,
-) -> Result<bool, ToolExecutionError> {
-    let request_id = next_approval_request_id(state);
+    request: &mut ToolExecutionRequest,
+    authorization: &AuthorizationDecision,
+    cancellation: Option<StreamCancellationToken>,
+) -> Result<(), ToolExecutionError> {
+    let request_id = next_approval_request_id();
+    request.approval_id = Some(request_id.clone());
     let (response_tx, response_rx) = oneshot::channel();
+    let snapshot = build_approval_snapshot(request_id.clone(), request, authorization);
 
     {
         let mut pending = state.pending_approvals.lock().await;
-        pending.insert(request_id.clone(), PendingApproval { response_tx });
+        pending.insert(
+            request_id.clone(),
+            PendingApproval {
+                snapshot: snapshot.clone(),
+                frozen_request: request.clone(),
+                response_tx,
+            },
+        );
     }
 
     let emit_result = app_handle.emit(
         "agent-tool-approval-request",
         ToolApprovalRequestEvent {
-            request_id: request_id.clone(),
-            stream_id: request.stream_id.clone(),
-            server_name: request.server_name.clone(),
-            tool_name: request.tool_name.clone(),
-            arguments: redacted_arguments(&request.arguments),
-            permission: permission.clone(),
+            approval_id: snapshot.id.clone(),
+            stream_id: snapshot.stream_id.clone(),
+            provider_tool_name: snapshot.provider_tool_name.clone(),
+            server_name: snapshot.server_name.clone(),
+            tool_name: snapshot.tool_name.clone(),
+            arguments: snapshot.arguments.clone(),
+            permission: snapshot.permission.clone(),
+            risk_level: snapshot.risk_level,
+            action_label: snapshot.action_label.clone(),
+            description: snapshot.description.clone(),
+            requested_at_ms: snapshot.requested_at_ms,
+            expires_at_ms: snapshot.expires_at_ms,
+            request_origin: snapshot.request_origin.clone(),
+            capability: snapshot.capability.clone(),
+            scope: snapshot.scope.clone(),
         },
     );
 
@@ -755,52 +996,136 @@ async fn request_tool_approval(
                 ToolExecutionErrorKind::PermissionRequired,
                 format!("Failed to emit approval request: {}", error),
             )
-            .with_permission(permission.clone()),
+            .with_permission(authorization.permission.clone()),
         );
     }
 
-    match tokio::time::timeout(Duration::from_secs(300), response_rx).await {
-        Ok(Ok(approved)) => Ok(approved),
-        Ok(Err(_)) => Err(
-            ToolExecutionError::new(
-                ToolExecutionErrorKind::PermissionRequired,
-                format!(
-                    "Approval channel closed for '{}.{}'",
-                    request.server_name, request.tool_name
-                ),
-            )
-            .with_permission(permission.clone()),
-        ),
-        Err(_) => {
-            let mut pending = state.pending_approvals.lock().await;
-            pending.remove(&request_id);
-            Err(
+    let mut approval_timeout = tokio::time::sleep(Duration::from_secs(300));
+    tokio::pin!(approval_timeout);
+
+    let resolution = if let Some(token) = cancellation {
+        let mut cancel_wait = token.child_token();
+        tokio::select! {
+            result = response_rx => result.map_err(|_| {
                 ToolExecutionError::new(
                     ToolExecutionErrorKind::PermissionRequired,
                     format!(
-                        "Approval timed out for '{}.{}'",
+                        "Approval channel closed for '{}.{}'",
                         request.server_name, request.tool_name
                     ),
                 )
-                .with_permission(permission.clone()),
+                .with_permission(authorization.permission.clone())
+            })?,
+            _ = &mut approval_timeout => ApprovalResolution::Expired,
+            _ = cancel_wait.cancelled() => ApprovalResolution::Cancelled,
+        }
+    } else {
+        tokio::select! {
+            result = response_rx => result.map_err(|_| {
+                ToolExecutionError::new(
+                    ToolExecutionErrorKind::PermissionRequired,
+                    format!(
+                        "Approval channel closed for '{}.{}'",
+                        request.server_name, request.tool_name
+                    ),
+                )
+                .with_permission(authorization.permission.clone())
+            })?,
+            _ = &mut approval_timeout => ApprovalResolution::Expired,
+        }
+    };
+
+    match resolution {
+        ApprovalResolution::AllowOnce => {
+            Ok(())
+        }
+        ApprovalResolution::Deny => {
+            let error = ToolExecutionError::new(
+                ToolExecutionErrorKind::ApprovalRejected,
+                format!(
+                    "User denied approval for '{}.{}' ({:?})",
+                    request.server_name, request.tool_name, authorization.level
+                ),
             )
+            .with_permission(authorization.permission.clone());
+            let audit_entry = ToolAuditEntry::from_denied_request(request, authorization, &error);
+            let _ = log_tool_audit(app_handle, &audit_entry).await;
+            Err(error)
+        }
+        ApprovalResolution::Cancelled => {
+            let mut pending = state.pending_approvals.lock().await;
+            pending.remove(&request_id);
+            emit_approval_resolved(app_handle, &snapshot, ApprovalStatus::Cancelled);
+            let error = ToolExecutionError::new(
+                ToolExecutionErrorKind::Cancelled,
+                format!(
+                    "Approval wait cancelled for '{}.{}'",
+                    request.server_name, request.tool_name
+                ),
+            )
+            .with_permission(authorization.permission.clone());
+            let audit_entry = ToolAuditEntry::from_cancelled_request(request, authorization, &error);
+            let _ = log_tool_audit(app_handle, &audit_entry).await;
+            Err(error)
+        }
+        ApprovalResolution::Expired => {
+            let mut pending = state.pending_approvals.lock().await;
+            pending.remove(&request_id);
+            emit_approval_resolved(app_handle, &snapshot, ApprovalStatus::Expired);
+            let error = ToolExecutionError::new(
+                ToolExecutionErrorKind::ApprovalExpired,
+                format!(
+                    "Approval expired for '{}.{}'",
+                    request.server_name, request.tool_name
+                ),
+            )
+            .with_permission(authorization.permission.clone());
+            let audit_entry = ToolAuditEntry::from_denied_request(request, authorization, &error);
+            let _ = log_tool_audit(app_handle, &audit_entry).await;
+            Err(error)
+        }
+        ApprovalResolution::Invalidated => {
+            emit_approval_resolved(app_handle, &snapshot, ApprovalStatus::Invalidated);
+            let error = ToolExecutionError::new(
+                ToolExecutionErrorKind::ApprovalInvalidated,
+                format!(
+                    "Approval invalidated for '{}.{}'",
+                    request.server_name, request.tool_name
+                ),
+            )
+            .with_permission(authorization.permission.clone());
+            let audit_entry = ToolAuditEntry::from_denied_request(request, authorization, &error);
+            let _ = log_tool_audit(app_handle, &audit_entry).await;
+            Err(error)
         }
     }
 }
 
 #[tauri::command]
 pub async fn mcp_respond_to_permission_request(
+    app_handle: AppHandle,
     state: State<'_, McpSystemState>,
-    request_id: String,
+    approval_id: String,
     allow: bool,
 ) -> Result<(), String> {
     let mut pending = state.pending_approvals.lock().await;
     let approval = pending
-        .remove(&request_id)
-        .ok_or_else(|| format!("Approval request '{}' was not found", request_id))?;
+        .remove(&approval_id)
+        .ok_or_else(|| format!("Approval request '{}' was not found", approval_id))?;
+
+    let status = if allow {
+        ApprovalStatus::Approved
+    } else {
+        ApprovalStatus::Denied
+    };
+    emit_approval_resolved(&app_handle, &approval.snapshot, status);
 
     approval
         .response_tx
-        .send(allow)
-        .map_err(|_| format!("Approval request '{}' is no longer waiting", request_id))
+        .send(if allow {
+            ApprovalResolution::AllowOnce
+        } else {
+            ApprovalResolution::Deny
+        })
+        .map_err(|_| format!("Approval request '{}' is no longer waiting", approval_id))
 }

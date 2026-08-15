@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 use base64::Engine;
@@ -17,13 +16,7 @@ use jarvis_core::models::{
 };
 
 use crate::agent;
-
-static STREAM_CANCEL_REGISTRY: OnceLock<Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>> =
-    OnceLock::new();
-
-fn stream_cancel_registry() -> &'static Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>> {
-    STREAM_CANCEL_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
-}
+use crate::agent::cancellation::{StreamCancellationRegistry, StreamCancellationToken};
 
 #[derive(Clone)]
 struct ProviderConfig {
@@ -623,7 +616,7 @@ async fn stream_from_provider(
     app: &AppHandle,
     request: &ChatStreamRequest,
     provider_config: &ProviderConfig,
-    cancel_rx: &mut tokio::sync::oneshot::Receiver<()>,
+    cancellation: &StreamCancellationToken,
 ) -> Result<(), AppError> {
     emit_provider_event(app, &request.stream_id, provider_config);
 
@@ -637,9 +630,10 @@ async fn stream_from_provider(
     let mut buffer = String::new();
 
     loop {
+        let mut cancel_wait = cancellation.child_token();
         tokio::select! {
-            _ = &mut *cancel_rx => {
-                return Ok(());
+            _ = cancel_wait.cancelled() => {
+                return Err(AppError::Cancelled);
             }
             next_chunk = byte_stream.next() => {
                 match next_chunk {
@@ -739,29 +733,20 @@ async fn stream_from_provider(
     }
 }
 
-async fn run_stream_with_fallback(app: AppHandle, request: ChatStreamRequest) -> Result<(), AppError> {
+async fn run_stream_with_fallback(
+    app: AppHandle,
+    request: ChatStreamRequest,
+    cancellation: StreamCancellationToken,
+) -> Result<(), AppError> {
     let providers = resolve_provider_configs(&request)?;
     let mut last_error: Option<AppError> = None;
 
-    let mut cancel_rx = {
-        let mut registry = stream_cancel_registry()
-            .lock()
-            .map_err(|e| AppError::Network(e.to_string()))?;
-
-        if let Some(prev) = registry.remove(&request.stream_id) {
-            let _ = prev.send(());
-        }
-
-        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
-        registry.insert(request.stream_id.clone(), cancel_tx);
-        cancel_rx
-    };
-
     for provider in providers {
-        match stream_from_provider(&app, &request, &provider, &mut cancel_rx).await {
+        match stream_from_provider(&app, &request, &provider, &cancellation).await {
             Ok(()) => {
                 return Ok(());
             }
+            Err(AppError::Cancelled) => return Err(AppError::Cancelled),
             Err(e) => {
                 last_error = Some(e);
             }
@@ -947,16 +932,33 @@ pub async fn stream_chat(app: AppHandle, request: ChatStreamRequest) -> Result<(
 
     let app_for_stream = app.clone();
     let stream_id = request.stream_id.clone();
+    let cancellation = app
+        .state::<StreamCancellationRegistry>()
+        .register(&stream_id)
+        .await;
 
     tauri::async_runtime::spawn(async move {
         let should_use_tools = agent::should_use_agent_loop(&app_for_stream, &request).await;
         let result = if should_use_tools {
-            agent::run_tool_loop_stream(app_for_stream.clone(), request).await
+            agent::run_tool_loop_stream(app_for_stream.clone(), request, cancellation.child_token()).await
         } else {
-            run_stream_with_fallback(app_for_stream.clone(), request).await
+            run_stream_with_fallback(app_for_stream.clone(), request, cancellation.child_token()).await
         };
 
         if let Err(error) = result {
+            if matches!(error, AppError::Cancelled) {
+                let _ = app_for_stream
+                    .state::<StreamCancellationRegistry>()
+                    .finish(&stream_id)
+                    .await;
+                let _ = app_for_stream.emit(
+                    "chat-stream-done",
+                    StreamDoneEvent {
+                        stream_id: stream_id.clone(),
+                    },
+                );
+                return;
+            }
             emit_stream_error(&app_for_stream, &stream_id, error.to_string());
         }
 
@@ -967,24 +969,21 @@ pub async fn stream_chat(app: AppHandle, request: ChatStreamRequest) -> Result<(
             },
         );
 
-        if let Ok(mut registry) = stream_cancel_registry().lock() {
-            registry.remove(&stream_id);
-        }
+        app_for_stream
+            .state::<StreamCancellationRegistry>()
+            .finish(&stream_id)
+            .await;
     });
 
     Ok(())
 }
 
 #[tauri::command]
-pub fn cancel_chat_stream(stream_id: String) -> Result<(), String> {
-    let mut registry = stream_cancel_registry()
-        .lock()
-        .map_err(|e| e.to_string())?;
-
-    if let Some(cancel_tx) = registry.remove(&stream_id) {
-        let _ = cancel_tx.send(());
-    }
-
+pub async fn cancel_chat_stream(
+    stream_id: String,
+    registry: tauri::State<'_, StreamCancellationRegistry>,
+) -> Result<(), String> {
+    registry.cancel(&stream_id).await;
     Ok(())
 }
 

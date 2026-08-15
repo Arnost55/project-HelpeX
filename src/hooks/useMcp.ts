@@ -50,7 +50,7 @@ export const useMcp = () => {
         }
     };
 
-    const executeTool = async (serverName: string, toolName: string, args: any): Promise<any> => {
+    const executeTool = async (serverName: string, toolName: string, args: unknown): Promise<unknown> => {
         try {
             console.log(`⚡ [MCP Hook] Executing ${serverName}__${toolName} with args:`, args);
             return await invoke("mcp_execute_tool", { serverName, toolName, arguments: args });
@@ -61,8 +61,8 @@ export const useMcp = () => {
         }
     };
 
-    const respondToPermissionRequest = async (requestId: string, allow: boolean): Promise<void> => {
-        await invoke("mcp_respond_to_permission_request", { requestId, allow });
+    const respondToPermissionRequest = async (approvalId: string, allow: boolean): Promise<void> => {
+        await invoke("mcp_respond_to_permission_request", { approvalId, allow });
     };
 
     const removeNode = async (name: string) => {
@@ -71,7 +71,7 @@ export const useMcp = () => {
             await invoke("mcp_disconnect_server", { name });
             await refreshActiveTools();
             return true;
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error(`❌ [MCP Hook] Failed to gracefully disconnect node [${name}]:`, err);
             return false;
         }

@@ -1,3 +1,4 @@
+pub mod cancellation;
 mod provider;
 
 use std::collections::{HashMap, HashSet};
@@ -11,7 +12,9 @@ use jarvis_core::models::{
     ChatInputMessage, ChatStreamRequest, StreamChunkEvent, StreamProviderEvent,
 };
 
+use crate::agent::cancellation::StreamCancellationToken;
 use crate::mcp::{self, McpSystemState, ToolExecutionRequest};
+use crate::mcp::authorization::{build_action_context, RequestAuthority, RequestOrigin};
 
 const MAX_TOOL_ITERATIONS: usize = 8;
 const MAX_TOOL_RESULT_CHARS: usize = 12_000;
@@ -33,6 +36,8 @@ struct ToolDefinition {
     tool_name: String,
     description: Option<String>,
     input_schema: Value,
+    annotations: Option<Value>,
+    metadata: Option<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -85,6 +90,7 @@ pub async fn should_use_agent_loop(app_handle: &AppHandle, request: &ChatStreamR
 pub async fn run_tool_loop_stream(
     app_handle: AppHandle,
     request: ChatStreamRequest,
+    cancellation: StreamCancellationToken,
 ) -> Result<(), AppError> {
     let providers = resolve_provider_configs(&request)?;
     let state = app_handle.state::<McpSystemState>();
@@ -117,6 +123,7 @@ pub async fn run_tool_loop_stream(
             &tools,
             &tool_map,
             &base_messages,
+            cancellation.child_token(),
         )
         .await
         {
@@ -186,6 +193,8 @@ async fn build_tool_definitions(state: &McpSystemState) -> Vec<ToolDefinition> {
             tool_name: tool.name,
             description: tool.description,
             input_schema: tool.input_schema,
+            annotations: tool.annotations,
+            metadata: tool.metadata,
         })
         .collect()
 }
@@ -244,12 +253,24 @@ async fn run_with_provider(
     tools: &[ToolDefinition],
     tool_map: &HashMap<String, ToolDefinition>,
     base_messages: &[AgentMessage],
+    cancellation: StreamCancellationToken,
 ) -> Result<(), AppError> {
     let mut messages = base_messages.to_vec();
     let mut seen_calls = HashSet::new();
 
     for _ in 0..MAX_TOOL_ITERATIONS {
-        let turn = provider::complete(provider, request, &messages, tools).await?;
+        if cancellation.is_cancelled() {
+            return Err(AppError::Cancelled);
+        }
+
+        let turn = provider::complete(
+            provider,
+            request,
+            &messages,
+            tools,
+            cancellation.child_token(),
+        )
+        .await?;
         if turn.tool_calls.is_empty() {
             let final_text = turn
                 .content
@@ -333,7 +354,24 @@ async fn run_with_provider(
                     tool_name: tool_definition.tool_name.clone(),
                     arguments: tool_call.arguments.clone(),
                     stream_id: Some(request.stream_id.clone()),
+                    approval_id: None,
+                    tool_alias: Some(tool_call.name.clone()),
+                    tool_description: tool_definition.description.clone(),
+                    action_context: build_action_context(
+                        &tool_definition.server_name,
+                        &mcp::McpTool {
+                            name: tool_definition.tool_name.clone(),
+                            description: tool_definition.description.clone(),
+                            input_schema: tool_definition.input_schema.clone(),
+                            annotations: tool_definition.annotations.clone(),
+                            metadata: tool_definition.metadata.clone(),
+                        },
+                        Some(tool_call.name.clone()),
+                        RequestOrigin::DirectUser,
+                        RequestAuthority::DirectUserInstruction,
+                    ),
                 },
+                Some(cancellation.child_token()),
             )
             .await
             {
@@ -351,10 +389,13 @@ async fn run_with_provider(
                         &outcome.tool_name,
                         &outcome.result_summary,
                         outcome.duration_ms,
-                        Some(format!("{:?}", outcome.permission.decision)),
+                        Some(format!("{:?}", outcome.authorization.decision)),
                     );
                 }
                 Err(error) => {
+                    if matches!(error.kind, mcp::ToolExecutionErrorKind::Cancelled) {
+                        return Err(AppError::Cancelled);
+                    }
                     let structured = mcp::structured_tool_error(&error);
                     append_tool_result(
                         &mut messages,

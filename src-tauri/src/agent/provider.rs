@@ -3,6 +3,8 @@ use serde_json::{json, Value};
 use jarvis_core::error::AppError;
 use jarvis_core::models::ChatStreamRequest;
 
+use crate::agent::cancellation::StreamCancellationToken;
+
 use super::{AgentMessage, AssistantTurn, ProviderConfig, ToolCall, ToolDefinition};
 
 pub fn supports_tools(provider: &str) -> bool {
@@ -17,11 +19,12 @@ pub async fn complete(
     request: &ChatStreamRequest,
     messages: &[AgentMessage],
     tools: &[ToolDefinition],
+    cancellation: StreamCancellationToken,
 ) -> Result<AssistantTurn, AppError> {
     match provider.provider.as_str() {
-        "claude" => complete_claude(provider, request, messages, tools).await,
+        "claude" => complete_claude(provider, request, messages, tools, cancellation).await,
         "openai" | "ollama" | "groq" | "together" => {
-            complete_openai_compatible(provider, request, messages, tools).await
+            complete_openai_compatible(provider, request, messages, tools, cancellation).await
         }
         _ => Err(AppError::InvalidInput(format!(
             "Provider '{}' does not support tool calling",
@@ -35,6 +38,7 @@ async fn complete_openai_compatible(
     request: &ChatStreamRequest,
     messages: &[AgentMessage],
     tools: &[ToolDefinition],
+    cancellation: StreamCancellationToken,
 ) -> Result<AssistantTurn, AppError> {
     let url = openai_compatible_chat_url(provider);
     let client = reqwest::Client::builder()
@@ -57,7 +61,11 @@ async fn complete_openai_compatible(
             request_builder.header("Authorization", format!("Bearer {}", api_key.trim()));
     }
 
-    let response = request_builder.json(&payload).send().await?;
+    let mut cancel_wait = cancellation.child_token();
+    let response = tokio::select! {
+        response = request_builder.json(&payload).send() => response?,
+        _ = cancel_wait.cancelled() => return Err(AppError::Cancelled),
+    };
     let status = response.status();
     let raw = response
         .text()
@@ -242,6 +250,7 @@ async fn complete_claude(
     request: &ChatStreamRequest,
     messages: &[AgentMessage],
     tools: &[ToolDefinition],
+    cancellation: StreamCancellationToken,
 ) -> Result<AssistantTurn, AppError> {
     let api_key = provider
         .api_key
@@ -261,14 +270,17 @@ async fn complete_claude(
         .map_err(|error| AppError::Network(error.to_string()))?;
 
     let payload = build_claude_payload(provider, request, messages, tools);
-    let response = client
-        .post(url)
-        .header("x-api-key", api_key.trim())
-        .header("anthropic-version", "2023-06-01")
-        .header("Content-Type", "application/json")
-        .json(&payload)
-        .send()
-        .await?;
+    let mut cancel_wait = cancellation.child_token();
+    let response = tokio::select! {
+        response = client
+            .post(url)
+            .header("x-api-key", api_key.trim())
+            .header("anthropic-version", "2023-06-01")
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send() => response?,
+        _ = cancel_wait.cancelled() => return Err(AppError::Cancelled),
+    };
 
     let status = response.status();
     let raw = response

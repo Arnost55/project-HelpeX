@@ -7,6 +7,7 @@ mod tray;
 
 use mcp::McpSystemState;
 use tauri::Manager;
+use crate::agent::cancellation::StreamCancellationRegistry;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -20,6 +21,7 @@ pub fn run() {
                 .build(),
         )
         .manage(McpSystemState::default())
+        .manage(StreamCancellationRegistry::default())
         .setup(|app| {
             let app_handle = app.handle().clone();
 
@@ -101,5 +103,12 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|_app_handle, event| if let tauri::RunEvent::Exit = event {});
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            let app = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                app.state::<StreamCancellationRegistry>().cancel_all().await;
+            });
+        }
+    });
 }

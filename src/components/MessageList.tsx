@@ -1,10 +1,10 @@
-import type { Message } from "../types/chat";
-import type { HTMLAttributes, ReactNode } from "react";
+import type { HTMLAttributes, ReactElement, ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import type { Components } from "react-markdown";
-import { User, Bot } from "lucide-react";
+import { Bot, User } from "lucide-react";
+import type { Message } from "../types/chat";
 
 function CodeBlock({ className, children, ...props }: HTMLAttributes<HTMLElement>) {
   const match = /language-(\w+)/.exec(className || "");
@@ -12,23 +12,23 @@ function CodeBlock({ className, children, ...props }: HTMLAttributes<HTMLElement
   const code = String(children).replace(/\n$/, "");
 
   return (
-    <div className="my-3 rounded-lg overflow-hidden" style={{ border: '1px solid var(--border-panel)' }}>
-      {language && (
-        <div className="px-4 py-1.5 flex items-center justify-between" style={{ backgroundColor: 'var(--bg-field)', borderBottom: '1px solid var(--border-panel)' }}>
-          <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{language}</span>
+    <div className="my-3 overflow-hidden rounded-2xl border" style={{ borderColor: "var(--border-panel)" }}>
+      {language ? (
+        <div className="flex items-center justify-between px-4 py-2" style={{ backgroundColor: "var(--surface-elevated)" }}>
+          <span className="text-[10px] uppercase tracking-[0.16em]" style={{ color: "var(--text-muted)" }}>
+            {language}
+          </span>
           <button
             onClick={() => navigator.clipboard.writeText(code)}
-            className="text-[10px] font-mono transition-colors"
-            style={{ color: 'var(--text-muted)' }}
-            onMouseEnter={(e) => e.currentTarget.style.color = 'var(--accent-glow)'}
-            onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
+            className="text-[10px]"
+            style={{ color: "var(--text-secondary)" }}
           >
-            copy
+            Copy
           </button>
         </div>
-      )}
-      <pre className="p-4 overflow-x-auto m-0" style={{ backgroundColor: 'var(--bg-field)' }}>
-        <code className={`${className || ""} text-sm font-mono leading-relaxed`} {...props}>
+      ) : null}
+      <pre className="m-0 overflow-x-auto p-4" style={{ backgroundColor: "var(--surface-panel)" }}>
+        <code className={className || ""} {...props}>
           {children}
         </code>
       </pre>
@@ -38,7 +38,7 @@ function CodeBlock({ className, children, ...props }: HTMLAttributes<HTMLElement
 
 function Table({ children }: { children: ReactNode }) {
   return (
-    <div className="my-3 overflow-x-auto rounded-lg" style={{ border: '1px solid var(--border-panel)' }}>
+    <div className="my-3 overflow-x-auto rounded-2xl border" style={{ borderColor: "var(--border-panel)" }}>
       <table className="w-full text-sm">{children}</table>
     </div>
   );
@@ -51,100 +51,120 @@ const markdownComponents: Components = {
       return <code className={className} {...props}>{children}</code>;
     }
     return (
-      <code className="px-1.5 py-0.5 rounded text-xs font-mono" style={{ backgroundColor: 'var(--bg-field)', color: 'var(--accent-glow)' }} {...props}>
+      <code
+        className="rounded-lg px-1.5 py-0.5 text-xs"
+        style={{ backgroundColor: "var(--surface-elevated)", color: "var(--accent-primary)" }}
+        {...props}
+      >
         {children}
       </code>
     );
   },
   pre({ children }) {
-    const codeElement = children as React.ReactElement | undefined;
-    const lang = codeElement?.props?.className?.replace("language-", "") || "";
-    return <CodeBlock className={`language-${lang}`}>{codeElement?.props?.children}</CodeBlock>;
+    const codeElement = children as ReactElement | undefined;
+    const language = codeElement?.props?.className || "";
+    return <CodeBlock className={language}>{codeElement?.props?.children}</CodeBlock>;
   },
   table({ children }) {
     return <Table>{children}</Table>;
-  }
+  },
 };
 
-export default function MessageList(props: { messages: Message[]; isStreaming: boolean }): JSX.Element {
-  const lastMessage = props.messages[props.messages.length - 1];
-  const showTypingIndicator = props.isStreaming && (!lastMessage || lastMessage.role !== "assistant");
+interface MessageListProps {
+  isStreaming: boolean;
+  messages: Message[];
+  variant?: "full" | "compact";
+}
 
-  if (props.messages.length === 0) {
+export default function MessageList({
+  isStreaming,
+  messages,
+  variant = "full",
+}: MessageListProps): JSX.Element {
+  const lastMessage = messages[messages.length - 1];
+  const showTypingIndicator = isStreaming && (!lastMessage || lastMessage.role !== "assistant");
+
+  if (messages.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center p-8">
-        <div className="text-center max-w-md">
-          <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5" style={{ backgroundColor: 'var(--accent-soft)', border: '1px solid rgba(0, 245, 184, 0.15)' }}>
-            <Bot size={32} style={{ color: 'var(--accent-glow)' }} />
+      <div className="flex flex-1 items-center justify-center px-8 py-12">
+        <div className="max-w-md text-center">
+          <div
+            className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border"
+            style={{ backgroundColor: "var(--surface-elevated)", borderColor: "var(--border-panel)" }}
+          >
+            <Bot size={28} style={{ color: "var(--accent-primary)" }} />
           </div>
-          <h2 className="text-xl font-bold mb-2" style={{ color: 'var(--text-primary)' }}>Ready when you are.</h2>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              Ask a question to start your first conversation.
-            </p>
+          <h2 className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>
+            HelpeX is ready.
+          </h2>
+          <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>
+            Start a conversation to inspect systems, run tools, or queue approvals.
+          </p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4">
-      {props.messages.map((message) => (
-        <article
-          key={message.id}
-          className={`flex gap-3 ${message.role === "user" ? "flex-row-reverse" : "flex-row"}`}
-        >
-          {/* Avatar */}
-          <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
-            style={{ backgroundColor: 'var(--accent-soft)', border: '1px solid var(--message-user-border)' }}
-          >
-            {message.role === "user" ? (
-              <User size={14} style={{ color: 'var(--accent-glow)' }} />
-            ) : (
-              <Bot size={14} style={{ color: 'var(--accent-glow)' }} />
-            )}
-          </div>
-
-          {/* Bubble */}
-          <div
-            className="max-w-[75%] rounded-2xl px-4 py-3"
-            style={{
-              backgroundColor: message.role === 'user' ? 'var(--message-user)' : 'var(--bg-panel)',
-              border: message.role === 'user' ? '1px solid var(--message-user-border)' : '1px solid var(--border-panel)',
-              borderRadius: message.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-            }}
-          >
-            <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>
-              {message.role === "user" ? "You" : "JARVIS"}
-            </p>
-            <div className="prose prose-invert prose-sm max-w-none">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeHighlight]}
-                components={markdownComponents}
+    <div className={`flex-1 overflow-y-auto ${variant === "compact" ? "pr-1" : "pr-2"}`}>
+      <div className="space-y-4">
+        {messages.map((message) => {
+          const user = message.role === "user";
+          return (
+            <article key={message.id} className={`flex gap-3 ${user ? "justify-end" : "justify-start"}`}>
+              {!user ? (
+                <div
+                  className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border"
+                  style={{ borderColor: "var(--border-panel)", backgroundColor: "var(--surface-elevated)" }}
+                >
+                  <Bot size={16} style={{ color: "var(--accent-primary)" }} />
+                </div>
+              ) : null}
+              <div
+                className={`${variant === "compact" ? "max-w-[88%]" : "max-w-[78%]"} rounded-3xl border px-4 py-3`}
+                style={{
+                  backgroundColor: user ? "rgba(93, 227, 201, 0.08)" : "var(--surface-panel)",
+                  borderColor: user ? "var(--border-focus)" : "var(--border-panel)",
+                }}
               >
-                {message.content}
-              </ReactMarkdown>
-            </div>
-          </div>
-        </article>
-      ))}
+                <div className="mb-2 flex items-center gap-2">
+                  {user ? <User size={14} style={{ color: "var(--text-secondary)" }} /> : null}
+                  <span className="text-[11px] uppercase tracking-[0.18em]" style={{ color: "var(--text-muted)" }}>
+                    {user ? "Operator" : "HelpeX"}
+                  </span>
+                </div>
+                <div className="prose prose-sm prose-invert max-w-none">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    rehypePlugins={[rehypeHighlight]}
+                    components={markdownComponents}
+                  >
+                    {message.content}
+                  </ReactMarkdown>
+                </div>
+              </div>
+            </article>
+          );
+        })}
 
-      {showTypingIndicator && (
-        <article className="flex gap-3">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5" style={{ backgroundColor: 'var(--accent-soft)', border: '1px solid var(--message-user-border)' }}>
-            <Bot size={14} style={{ color: 'var(--accent-glow)' }} />
-          </div>
-          <div className="rounded-2xl rounded-tl-md px-4 py-3" style={{ backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-panel)' }}>
-            <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>JARVIS</p>
-            <div className="flex gap-1">
-              <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: 'var(--accent-glow)', animationDelay: "0ms" }} />
-              <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: 'var(--accent-glow)', animationDelay: "150ms" }} />
-              <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: 'var(--accent-glow)', animationDelay: "300ms" }} />
+        {showTypingIndicator ? (
+          <article className="flex gap-3">
+            <div
+              className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border"
+              style={{ borderColor: "var(--border-panel)", backgroundColor: "var(--surface-elevated)" }}
+            >
+              <Bot size={16} style={{ color: "var(--accent-primary)" }} />
             </div>
-          </div>
-        </article>
-      )}
+            <div className="rounded-3xl border px-4 py-3" style={{ backgroundColor: "var(--surface-panel)", borderColor: "var(--border-panel)" }}>
+              <div className="flex gap-1.5">
+                <span className="h-2 w-2 animate-bounce rounded-full" style={{ backgroundColor: "var(--accent-primary)" }} />
+                <span className="h-2 w-2 animate-bounce rounded-full" style={{ backgroundColor: "var(--accent-primary)", animationDelay: "120ms" }} />
+                <span className="h-2 w-2 animate-bounce rounded-full" style={{ backgroundColor: "var(--accent-primary)", animationDelay: "240ms" }} />
+              </div>
+            </div>
+          </article>
+        ) : null}
+      </div>
     </div>
   );
 }

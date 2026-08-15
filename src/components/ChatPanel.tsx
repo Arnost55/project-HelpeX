@@ -1,19 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import {
+  Eye,
+  EyeOff,
+  MessageSquarePlus,
+  Settings,
+  ShieldAlert,
+  Trash2,
+} from "lucide-react";
 import MessageList from "./MessageList";
 import MessageInput from "./MessageInput";
 import { useChatStore } from "../store/chatStore";
 import { useSettingsStore } from "../store/settingsStore";
 import { useIncognitoStore } from "../store/incognitoStore";
+import { useToolApprovalStore } from "../store/toolApprovalStore";
 import { createId } from "../utils/id";
 import { saveConversation, saveMessage } from "../api/tauriDb";
 import { estimateConversationTokens } from "../utils/tokens";
 import { validateProviderSettings } from "../utils/providerValidation";
 import { useMcp } from "../hooks/useMcp";
-import { transformMcpTools, parseProviderToolCalls } from "../utils/llmProviders";
-import type { LlmProvider } from "../utils/llmProviders";
-import { Square, Wifi, WifiOff, Layers, Cpu, Hash, AlertTriangle, Eye, EyeOff, Trash2, MessageSquarePlus } from "lucide-react";
+import ToolActivityList, { type ToolActivityItem } from "./chat/ToolActivityList";
 
 interface StreamChunkEvent {
   streamId: string;
@@ -43,20 +50,31 @@ interface AgentToolEvent {
   summary?: string | null;
   durationMs?: number | null;
   permissionDecision?: string | null;
+  permissionLevel?: string | null;
 }
 
-interface ToolActivity {
-  key: string;
-  label: string;
-  status: "running" | "success" | "error";
-  summary?: string;
-}
+const SUGGESTED_ACTIONS = [
+  "Show security events",
+  "Check server status",
+  "Run system backup",
+  "Turn on night mode",
+];
 
 function isKnownProvider(value: string): value is "openai" | "claude" | "ollama" | "groq" | "together" {
   return value === "openai" || value === "claude" || value === "ollama" || value === "groq" || value === "together";
 }
 
-export default function ChatPanel(props: { onNavigate?: (tab: "chat" | "settings", section?: string) => void; onNewChat?: () => void }): JSX.Element {
+interface ChatPanelProps {
+  mode?: "full" | "compact";
+  onOpenChatPage?: () => void;
+  onOpenSettings?: () => void;
+}
+
+export default function ChatPanel({
+  mode = "full",
+  onOpenChatPage,
+  onOpenSettings,
+}: ChatPanelProps): JSX.Element {
   const conversations = useChatStore((state) => state.conversations);
   const activeConversationId = useChatStore((state) => state.activeConversationId);
   const setActiveConversation = useChatStore((state) => state.setActiveConversation);
@@ -79,20 +97,22 @@ export default function ChatPanel(props: { onNavigate?: (tab: "chat" | "settings
   const fallbackModel = useSettingsStore((state) => state.fallbackModel);
   const temperature = useSettingsStore((state) => state.temperature);
   const maxTokens = useSettingsStore((state) => state.maxTokens);
-  const markProviderSuccess = useSettingsStore((state) => state.markProviderSuccess);
   const markProviderFailure = useSettingsStore((state) => state.markProviderFailure);
+  const markProviderSuccess = useSettingsStore((state) => state.markProviderSuccess);
   const providerHealth = useSettingsStore((state) => state.providerHealth);
   const isIncognito = useIncognitoStore((state) => state.isIncognito);
   const setIncognito = useIncognitoStore((state) => state.setIncognito);
-  const toggleIncognito = useIncognitoStore((state) => state.toggleIncognito);
   const [error, setError] = useState<string | null>(null);
   const [incognitoConfirmOpen, setIncognitoConfirmOpen] = useState(false);
   const [sessionKey, setSessionKey] = useState(0);
   const [activeStreamId, setActiveStreamId] = useState<string | null>(null);
   const [activeStreamProvider, setActiveStreamProvider] = useState<string | null>(null);
-  const [activeFallbackUsed, setActiveFallbackUsed] = useState(false);
-  const { activeServers, executeTool } = useMcp();
-  const [toolActivities, setToolActivities] = useState<ToolActivity[]>([]);
+  const [toolActivities, setToolActivities] = useState<ToolActivityItem[]>([]);
+  const [busyApprovalId, setBusyApprovalId] = useState<string | null>(null);
+  const pendingApprovals = useToolApprovalStore((state) => state.pending);
+  const removePendingApproval = useToolApprovalStore((state) => state.removePending);
+  const clearApprovalForTool = useToolApprovalStore((state) => state.clearForTool);
+  const { activeServers, respondToPermissionRequest } = useMcp();
 
   const activeConversation = useMemo(() => {
     if (activeConversationId) {
@@ -100,6 +120,30 @@ export default function ChatPanel(props: { onNavigate?: (tab: "chat" | "settings
     }
     return conversations[0] ?? null;
   }, [activeConversationId, conversations]);
+
+  const sortedConversations = useMemo(
+    () =>
+      [...conversations].sort((left, right) =>
+        left.updatedAt < right.updatedAt ? 1 : left.updatedAt > right.updatedAt ? -1 : 0,
+      ),
+    [conversations],
+  );
+
+  const visibleMessages = useMemo(() => {
+    if (!activeConversation) return [];
+    return mode === "compact"
+      ? activeConversation.messages.slice(-6)
+      : activeConversation.messages;
+  }, [activeConversation, mode]);
+
+  const visibleApprovals = useMemo(() => {
+    if (!activeStreamId) {
+      return pendingApprovals;
+    }
+    return pendingApprovals.filter(
+      (approval) => approval.streamId === activeStreamId || approval.streamId == null,
+    );
+  }, [activeStreamId, pendingApprovals]);
 
   const conversationTokenEstimate = useMemo(() => {
     if (!activeConversation) return 0;
@@ -116,13 +160,13 @@ export default function ChatPanel(props: { onNavigate?: (tab: "chat" | "settings
     if (!activeConversation) return;
     if (activeConversation.messages.length > 0) return;
     if (activeConversation.isIncognito === isIncognito) return;
-    const conversations = useChatStore.getState().conversations;
+    const currentConversations = useChatStore.getState().conversations;
     useChatStore.setState({
-      conversations: conversations.map((conversation) =>
+      conversations: currentConversations.map((conversation) =>
         conversation.id === activeConversation.id
           ? { ...conversation, isIncognito }
-          : conversation
-      )
+          : conversation,
+      ),
     });
   }, [activeConversation, isIncognito]);
 
@@ -143,23 +187,22 @@ export default function ChatPanel(props: { onNavigate?: (tab: "chat" | "settings
       } else {
         setIncognito(false);
       }
-    } else {
-      if (toggleLocked) return;
-      setIncognito(true);
-      if (!activeConversation || activeConversation.messages.length > 0) {
-        createConversation();
-      }
+      return;
+    }
+
+    if (toggleLocked) return;
+    setIncognito(true);
+    if (!activeConversation || activeConversation.messages.length > 0) {
+      createConversation();
     }
   }
 
   async function wipeSession(): Promise<void> {
-    console.log(`[ChatPanel.wipeSession] Starting wipe — isIncognito=${isIncognito}`);
     if (isIncognito) {
       try {
         await invoke("wipe_incognito_session");
-        console.log("[ChatPanel.wipeSession] Incognito partition wiped successfully");
-      } catch (e) {
-        console.error("[ChatPanel.wipeSession] Incognito wipe failed:", e);
+      } catch (wipeError) {
+        console.error("[ChatPanel] Incognito wipe failed:", wipeError);
       }
       useChatStore.getState().removeIncognitoConversations();
       useIncognitoStore.persist.clearStorage();
@@ -167,148 +210,38 @@ export default function ChatPanel(props: { onNavigate?: (tab: "chat" | "settings
     } else {
       try {
         await invoke("wipe_all_data");
-        console.log("[ChatPanel.wipeSession] All data wiped successfully");
-      } catch (e) {
-        console.error("[ChatPanel.wipeSession] Wipe failed:", e);
+      } catch (wipeError) {
+        console.error("[ChatPanel] Data wipe failed:", wipeError);
       }
       useChatStore.persist.clearStorage();
       useIncognitoStore.persist.clearStorage();
       useChatStore.getState().wipeChat();
     }
+
     setIncognitoConfirmOpen(false);
     setError(null);
-    setSessionKey((n) => n + 1);
+    setSessionKey((current) => current + 1);
   }
 
-  async function handleMCPChat(text: string): Promise<void> {
-    if (!activeConversation) return;
-    if (!useChatStore.getState().activeConversationId) return;
+  function cancelActiveStream(): void {
+    if (!activeStreamId) return;
+    void invoke("cancel_chat_stream", { stream_id: activeStreamId });
+  }
 
-    const mcpProvider: LlmProvider =
-      provider === "claude" ? "claude"
-      : provider === "ollama" ? "ollama"
-      : "openai";
-
-    const activeToolsCount = Object.values(activeServers).flat().length;
-    if (activeToolsCount === 0) {
-      return handleSend(text);
-    }
-
-    const formattedTools = transformMcpTools(activeServers, mcpProvider);
-
-    if (formattedTools.length === 0) {
-      console.warn("⚠️ [JARVIS Core] No active MCP tools found in state. AI will default to text-only mode.");
-    }
-
-    const jarvisSystemCore = {
-      role: "system",
-      content: `You are JARVIS, an advanced, elite desktop engineering assistant running locally on the user's machine.
-CRITICAL MANDATE: You possess real-time hardware capabilities via the Model Context Protocol (MCP). 
-Do NOT claim you lack file system or local workspace access. Use your available tools to fulfill user requests automatically. Proceed with absolute technical authority.`
-    };
-
-    const localizedMessages = [
-      jarvisSystemCore,
-      ...activeConversation.messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      })),
-      { role: "user", content: text }
-    ];
-
-    let endpointUrl = "http://localhost:11434/v1/chat/completions";
-    let headers: Record<string, string> = { "Content-Type": "application/json" };
-    let payload: any = {};
-
-    if (mcpProvider === "openai") {
-      endpointUrl = "https://api.openai.com/v1/chat/completions";
-      headers["Authorization"] = `Bearer ${apiKey.trim()}`;
-      payload = {
-        model,
-        messages: localizedMessages,
-        tools: formattedTools.length > 0 ? formattedTools : undefined,
-      };
-    } else if (mcpProvider === "claude") {
-      endpointUrl = "https://api.anthropic.com/v1/messages";
-      headers["x-api-key"] = claudeApiKey.trim();
-      headers["anthropic-version"] = "2023-06-01";
-      payload = {
-        model,
-        max_tokens: maxTokens,
-        messages: localizedMessages,
-        tools: formattedTools.length > 0 ? formattedTools : undefined,
-      };
-    } else if (mcpProvider === "ollama") {
-      endpointUrl = "http://localhost:11434/v1/chat/completions";
-      payload = {
-        model,
-        messages: localizedMessages,
-        tools: formattedTools.length > 0 ? formattedTools : undefined,
-        stream: false,
-      };
-    }
-
-    console.log("🚀 [Engine Outbound] Dispatched payload via OpenAI compatibility format:", JSON.stringify(payload, null, 2));
-
-    setError(null);
-    addMessage(activeConversation.id, {
-      id: createId("msg"),
-      role: "user",
-      content: text,
-      createdAt: new Date().toISOString(),
-      conversationId: activeConversation.id,
-    });
-
-    startStreaming();
-
+  async function handleApprovalDecision(requestId: string, allow: boolean): Promise<void> {
     try {
-      console.log(`[MCP Chat] Sending to ${mcpProvider} with ${Object.keys(activeServers).length} tool servers`);
-      const response = await fetch(endpointUrl, { method: "POST", headers, body: JSON.stringify(payload) });
-      if (!response.ok) {
-        const errText = await response.text().catch(() => "Unknown error");
-        throw new Error(`Provider returned ${response.status}: ${errText}`);
-      }
-
-      const data = await response.json();
-      const toolCalls = parseProviderToolCalls(data, mcpProvider);
-
-      if (toolCalls.length > 0) {
-        console.log(`[MCP Chat] Executing ${toolCalls.length} tool calls from AI...`);
-        for (const call of toolCalls) {
-          const result = await executeTool(call.serverName, call.toolName, call.arguments);
-          console.log(`[MCP Chat] Tool ${call.serverName}__${call.toolName} result:`, result);
-          addMessage(activeConversation.id, {
-            id: createId("msg"),
-            role: "assistant" as const,
-            content: `[Tool call: ${call.toolName} from ${call.serverName}]\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``,
-            createdAt: new Date().toISOString(),
-            conversationId: activeConversation.id,
-          });
-        }
-      } else {
-        const finalText = mcpProvider === "claude"
-          ? data.content?.[0]?.text ?? JSON.stringify(data)
-          : data.choices?.[0]?.message?.content ?? JSON.stringify(data);
-        addMessage(activeConversation.id, {
-          id: createId("msg"),
-          role: "assistant",
-          content: finalText,
-          createdAt: new Date().toISOString(),
-          conversationId: activeConversation.id,
-        });
-      }
-
-      markProviderSuccess(provider, false);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "MCP chat failed";
+      setBusyApprovalId(requestId);
+      await respondToPermissionRequest(requestId, allow);
+      removePendingApproval(requestId);
+    } catch (approvalError) {
+      const message = approvalError instanceof Error ? approvalError.message : "Approval update failed";
       setError(message);
-      markProviderFailure(provider);
     } finally {
-      stopStreaming();
+      setBusyApprovalId(null);
     }
   }
 
-  async function handleSend(text: string, systemPromptOverride?: string): Promise<void> {
+  async function handleSend(text: string): Promise<void> {
     if (!activeConversation) return;
     if (!useChatStore.getState().activeConversationId) return;
 
@@ -323,7 +256,7 @@ Do NOT claim you lack file system or local workspace access. Use your available 
       togetherBaseUrl,
       model,
       fallbackProvider,
-      fallbackModel
+      fallbackModel,
     });
 
     if (validationIssues.length > 0) {
@@ -339,7 +272,7 @@ Do NOT claim you lack file system or local workspace access. Use your available 
       role: "user",
       content: text,
       createdAt: new Date().toISOString(),
-      conversationId: activeConversation.id
+      conversationId: activeConversation.id,
     });
 
     try {
@@ -347,24 +280,23 @@ Do NOT claim you lack file system or local workspace access. Use your available 
       const streamId = createId("stream");
       setActiveStreamId(streamId);
       setActiveStreamProvider(null);
-      setActiveFallbackUsed(false);
       let streamProviderKey: "openai" | "claude" | "ollama" | "groq" | "together" = provider;
-      let fallbackWasUsed = false;
+      let fallbackUsed = false;
 
-      const refreshedConvo = useChatStore
+      const refreshedConversation = useChatStore
         .getState()
         .conversations.find((conversation) => conversation.id === activeConversation.id);
 
-      if (refreshedConvo && !isIncognito && !useChatStore.getState().cleaningUp) {
-        console.log(`[ChatPanel] Saving initial conversation ${refreshedConvo.id} (isIncognito=${isIncognito})`);
-        await saveConversation(refreshedConvo);
-        const latestUserMessage = refreshedConvo.messages[refreshedConvo.messages.length - 1];
+      if (refreshedConversation && !isIncognito && !useChatStore.getState().cleaningUp) {
+        await saveConversation(refreshedConversation);
+        const latestUserMessage = refreshedConversation.messages[refreshedConversation.messages.length - 1];
         if (latestUserMessage) {
-          await saveMessage({ ...latestUserMessage, conversationId: refreshedConvo.id });
+          await saveMessage({ ...latestUserMessage, conversationId: refreshedConversation.id });
         }
       }
 
       startStreaming();
+
       const latestConversation =
         useChatStore
           .getState()
@@ -397,11 +329,11 @@ Do NOT claim you lack file system or local workspace access. Use your available 
           resolve();
         };
 
-        const rejectOnce = (error: Error) => {
+        const rejectOnce = (streamError: Error) => {
           if (settled) return;
           settled = true;
           cleanup();
-          reject(error);
+          reject(streamError);
         };
 
         unlistenChunk = await listen<StreamChunkEvent>("chat-stream-chunk", (event) => {
@@ -424,11 +356,11 @@ Do NOT claim you lack file system or local workspace access. Use your available 
           const providerLabel = event.payload.fallbackUsed
             ? `${event.payload.provider} (fallback)`
             : event.payload.provider;
+
           if (isKnownProvider(event.payload.provider)) {
             streamProviderKey = event.payload.provider;
           }
-          fallbackWasUsed = event.payload.fallbackUsed;
-          setActiveFallbackUsed(event.payload.fallbackUsed);
+          fallbackUsed = event.payload.fallbackUsed;
           setActiveStreamProvider(`${providerLabel} • ${event.payload.model}`);
         });
 
@@ -439,8 +371,8 @@ Do NOT claim you lack file system or local workspace access. Use your available 
             const next = current.filter((item) => item.key !== key);
             next.push({
               key,
-              label: `${event.payload.serverName} • ${event.payload.toolName}`,
-              status: "running"
+              label: `Running ${event.payload.toolName} on ${event.payload.serverName}`,
+              status: "running",
             });
             return next;
           });
@@ -449,13 +381,14 @@ Do NOT claim you lack file system or local workspace access. Use your available 
         unlistenToolResult = await listen<AgentToolEvent>("agent-tool-result", (event) => {
           if (event.payload.streamId !== streamId) return;
           const key = `${event.payload.serverName}::${event.payload.toolName}`;
+          clearApprovalForTool(streamId, event.payload.serverName, event.payload.toolName);
           setToolActivities((current) => {
             const next = current.filter((item) => item.key !== key);
             next.push({
               key,
-              label: `${event.payload.serverName} • ${event.payload.toolName}`,
+              label: `Completed ${event.payload.toolName}`,
               status: "success",
-              summary: event.payload.summary ?? undefined
+              summary: event.payload.summary ?? undefined,
             });
             return next;
           });
@@ -464,13 +397,14 @@ Do NOT claim you lack file system or local workspace access. Use your available 
         unlistenToolError = await listen<AgentToolEvent>("agent-tool-error", (event) => {
           if (event.payload.streamId !== streamId) return;
           const key = `${event.payload.serverName}::${event.payload.toolName}`;
+          clearApprovalForTool(streamId, event.payload.serverName, event.payload.toolName);
           setToolActivities((current) => {
             const next = current.filter((item) => item.key !== key);
             next.push({
               key,
-              label: `${event.payload.serverName} • ${event.payload.toolName}`,
+              label: `Blocked ${event.payload.toolName}`,
               status: "error",
-              summary: event.payload.summary ?? undefined
+              summary: event.payload.summary ?? undefined,
             });
             return next;
           });
@@ -522,252 +456,285 @@ Do NOT claim you lack file system or local workspace access. Use your available 
                     : fallbackProvider === "together"
                       ? togetherBaseUrl.trim()
                       : undefined,
-              messages: systemPromptOverride
-                ? [{ role: "system", content: systemPromptOverride }, ...latestConversation.messages.map((message) => ({
-                    role: message.role,
-                    content: message.content
-                  }))]
-                : latestConversation.messages.map((message) => ({
-                    role: message.role,
-                    content: message.content
-                  }))
-            }
+              messages: latestConversation.messages.map((message) => ({
+                role: message.role,
+                content: message.content,
+              })),
+            },
           });
         } catch (invokeError) {
-          rejectOnce(invokeError instanceof Error ? invokeError : new Error("Failed to start stream"));
+          rejectOnce(invokeError instanceof Error ? invokeError : new Error("Failed to start chat stream"));
         }
       });
 
       await streamCompletion;
 
-      const postStreamConvo = useChatStore
+      const postStreamConversation = useChatStore
         .getState()
         .conversations.find((conversation) => conversation.id === activeConversation.id);
 
-      if (postStreamConvo && !isIncognito && !useChatStore.getState().cleaningUp) {
-        console.log(`[ChatPanel] Saving post-stream conversation ${postStreamConvo.id} (isIncognito=${isIncognito})`);
-        await saveConversation(postStreamConvo);
-        const latestAssistant = postStreamConvo.messages[postStreamConvo.messages.length - 1];
+      if (postStreamConversation && !isIncognito && !useChatStore.getState().cleaningUp) {
+        await saveConversation(postStreamConversation);
+        const latestAssistant = postStreamConversation.messages[postStreamConversation.messages.length - 1];
         if (latestAssistant && latestAssistant.role === "assistant") {
-          await saveMessage({ ...latestAssistant, conversationId: postStreamConvo.id });
+          await saveMessage({ ...latestAssistant, conversationId: postStreamConversation.id });
         }
       }
 
-      markProviderSuccess(streamProviderKey, fallbackWasUsed);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
+      markProviderSuccess(streamProviderKey, fallbackUsed);
+    } catch (streamError) {
+      const message = streamError instanceof Error ? streamError.message : "Unknown error";
       setError(message);
-      const postErrorConvo = useChatStore
-        .getState()
-        .conversations.find((conversation) => conversation.id === activeConversation.id);
-      if (postErrorConvo && !isIncognito && !useChatStore.getState().cleaningUp) {
-        console.log(`[ChatPanel] Saving post-error conversation ${postErrorConvo.id} (isIncognito=${isIncognito})`);
-        await saveConversation(postErrorConvo);
-        const latestAssistant = postErrorConvo.messages[postErrorConvo.messages.length - 1];
-        if (latestAssistant && latestAssistant.role === "assistant") {
-          await saveMessage({ ...latestAssistant, conversationId: postErrorConvo.id });
-        }
-      }
       markProviderFailure(provider);
     } finally {
       setActiveStreamId(null);
-      setActiveStreamProvider(null);
-      setActiveFallbackUsed(false);
       stopStreaming();
     }
   }
 
-  function handleStop(): void {
-    if (!activeStreamId) return;
-    setError("Generation stopped.");
-    void invoke("cancel_chat_stream", { stream_id: activeStreamId });
-  }
-
-  const healthOk = providerHealth[provider]?.healthy;
+  const providerStatus = providerHealth[provider];
+  const serverCount = Object.keys(activeServers).length;
 
   return (
-    <section key={sessionKey} className="flex flex-col h-full overflow-hidden">
-      {/* Top Bar */}
-      <header className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: 'var(--border-panel)', backgroundColor: 'var(--bg-panel)' }}>
-        <div className="flex items-center gap-4 min-w-0">
-          <div className="min-w-0">
-            <h2 className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
-              {activeConversation?.title ?? "No conversation"}
-            </h2>
-            <div className="flex items-center gap-3 mt-0.5">
-              <span className="flex items-center gap-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                <Cpu size={10} />
-                {provider}
-              </span>
-              <span className="flex items-center gap-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                <Layers size={10} />
-                {model}
-              </span>
-              <span className="flex items-center gap-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                <Hash size={10} />
-                {conversationTokenEstimate} tok
-              </span>
-              {activeStreamProvider && (
-                <span className="flex items-center gap-1 text-[10px]" style={{ color: 'var(--accent-glow)' }}>
-                  <Wifi size={10} className="animate-pulse" />
-                  {activeStreamProvider}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {isIncognito && (
-            <span className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-[10px] font-semibold" style={{ backgroundColor: 'rgba(56, 189, 248, 0.08)', color: 'var(--accent-secondary)', border: '1px solid rgba(56, 189, 248, 0.15)' }}>
-              <EyeOff size={10} />
-              Private Session
-            </span>
-          )}
-          {activeFallbackUsed && (
-            <span className="flex items-center gap-1 text-[10px] px-2 py-1 rounded" style={{ backgroundColor: 'rgba(255, 255, 255, 0.03)', color: 'var(--text-muted)', border: '1px solid var(--border-subtle)' }}>
-              <AlertTriangle size={10} />
-              Fallback active
-            </span>
-          )}
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded text-[10px]" style={{
-            backgroundColor: healthOk ? 'rgba(0, 245, 184, 0.06)' : 'var(--bg-field)',
-            color: healthOk ? 'var(--accent-glow)' : 'var(--text-muted)',
-            border: healthOk ? '1px solid rgba(0, 245, 184, 0.15)' : '1px solid var(--border-subtle)',
-          }}>
-            {healthOk ? <Wifi size={10} /> : <WifiOff size={10} />}
-            {healthOk ? 'Connected' : 'No signal'}
-          </div>
-          <button
-            onClick={handleToggleIncognito}
-            disabled={!isIncognito && toggleLocked}
-            className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-[10px] font-medium transition-all duration-200"
-            style={{
-              backgroundColor: isIncognito ? 'rgba(56, 189, 248, 0.08)' : 'transparent',
-              color: isIncognito ? 'var(--accent-secondary)' : 'var(--text-muted)',
-              border: isIncognito ? '1px solid rgba(56, 189, 248, 0.15)' : '1px solid var(--border-subtle)',
-              cursor: !isIncognito && toggleLocked ? 'not-allowed' : 'pointer',
-              opacity: !isIncognito && toggleLocked ? 0.4 : 1,
-            }}
-            onMouseEnter={(e) => {
-              if (isIncognito || (!isIncognito && toggleLocked)) return;
-              e.currentTarget.style.color = 'var(--accent-secondary)';
-              e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.3)';
-            }}
-            onMouseLeave={(e) => {
-              if (isIncognito || (!isIncognito && toggleLocked)) return;
-              e.currentTarget.style.color = 'var(--text-muted)';
-              e.currentTarget.style.borderColor = 'var(--border-subtle)';
-            }}
-            title={
-              !isIncognito && toggleLocked
-                ? "Start a New Chat to enable Privacy Mode."
-                : isIncognito
-                  ? "Disable Incognito Mode"
-                  : "Enable Incognito Mode"
-            }
+    <div key={sessionKey} className="h-full">
+      <div className={mode === "full" ? "grid h-full grid-cols-[280px_minmax(0,1fr)_320px] gap-4" : "grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]"}>
+        {mode === "full" ? (
+          <section
+            className="flex min-h-0 flex-col rounded-3xl border"
+            style={{ backgroundColor: "var(--surface-panel)", borderColor: "var(--border-panel)" }}
           >
-            {isIncognito ? <EyeOff size={10} /> : <Eye size={10} />}
-            {isIncognito ? 'Incognito' : 'Privacy'}
-          </button>
-          {!isIncognito && toggleLocked && (
-            <span className="flex items-center gap-1 text-[10px] max-w-[140px] leading-tight" style={{ color: 'var(--text-muted)' }}>
-              <MessageSquarePlus size={10} className="flex-shrink-0" style={{ color: 'var(--accent-glow)' }} />
-              New Chat to enable
-            </span>
-          )}
-          {isStreaming ? (
-            <button
-              onClick={handleStop}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
-              style={{ color: 'var(--danger)', backgroundColor: 'var(--danger-soft)', border: '1px solid rgba(255, 51, 85, 0.2)' }}
-            >
-              <Square size={12} />
-              Stop
-            </button>
-          ) : null}
-        </div>
-      </header>
-
-      {/* Error */}
-      {error ? (
-        <div className="mx-5 mt-3 px-4 py-2.5 rounded-lg flex items-center gap-2" style={{ backgroundColor: 'var(--danger-soft)', border: '1px solid rgba(255, 51, 85, 0.15)' }}>
-          <AlertTriangle size={14} style={{ color: 'var(--danger)' }} className="flex-shrink-0" />
-          <span className="text-xs" style={{ color: 'var(--danger)' }}>{error}</span>
-        </div>
-      ) : null}
-
-      {toolActivities.length > 0 ? (
-        <div className="mx-5 mt-3 rounded-lg px-4 py-3" style={{ backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-panel)' }}>
-          <div className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
-            Agent Actions
-          </div>
-          <div className="space-y-2">
-            {toolActivities.map((activity) => (
-              <div key={activity.key} className="flex items-start gap-2 text-xs">
-                <span style={{ color: activity.status === "error" ? 'var(--danger)' : activity.status === "success" ? 'var(--accent-glow)' : 'var(--text-muted)' }}>
-                  {activity.status === "running" ? "…" : activity.status === "success" ? "✓" : "!"}
-                </span>
-                <div className="min-w-0">
-                  <div style={{ color: 'var(--text-primary)' }}>{activity.label}</div>
-                  {activity.summary ? (
-                    <div className="truncate" style={{ color: 'var(--text-muted)' }}>{activity.summary}</div>
-                  ) : null}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {/* Messages */}
-      {activeConversation && activeConversation.messages.length > 0 ? (
-        <>
-          <MessageList messages={activeConversation.messages} isStreaming={isStreaming} />
-          <MessageInput disabled={isStreaming} onSubmit={handleSend} />
-        </>
-      ) : (
-        <>
-          <MessageInput disabled={isStreaming} onSubmit={(t) => handleSend(t)} />
-        </>
-      )}
-
-      {/* Incognito Confirmation Dialog */}
-      {incognitoConfirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="max-w-sm w-full mx-4 p-6 rounded-xl" style={{ backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-panel)' }}>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.15)' }}>
-                <EyeOff size={18} style={{ color: 'var(--accent-secondary)' }} />
-              </div>
+            <div className="flex items-center justify-between border-b px-4 py-4" style={{ borderColor: "var(--border-panel)" }}>
               <div>
-                <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>End Private Session?</h3>
-                <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>This will wipe the current session</p>
+                <h2 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                  Conversations
+                </h2>
+                <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                  Stored locally{isIncognito ? " • incognito active" : ""}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={createConversation}
+                className="flex h-9 w-9 items-center justify-center rounded-xl"
+                style={{ backgroundColor: "var(--surface-elevated)", color: "var(--text-primary)" }}
+              >
+                <MessageSquarePlus size={16} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3">
+              <div className="space-y-2">
+                {sortedConversations.map((conversation) => {
+                  const active = conversation.id === activeConversationId;
+                  return (
+                    <button
+                      key={conversation.id}
+                      type="button"
+                      onClick={() => setActiveConversation(conversation.id)}
+                      className="w-full rounded-2xl border px-3 py-3 text-left"
+                      style={{
+                        backgroundColor: active ? "rgba(93, 227, 201, 0.08)" : "var(--surface-elevated)",
+                        borderColor: active ? "var(--border-focus)" : "var(--border-subtle)",
+                      }}
+                    >
+                      <p className="truncate text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+                        {conversation.title}
+                      </p>
+                      <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
+                        {conversation.messages.length} messages
+                      </p>
+                    </button>
+                  );
+                })}
               </div>
             </div>
-            <p className="text-xs mb-5 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-              Turning off incognito mode will clear all messages from the current conversation
-              and start a fresh session. No history will be saved from this session.
-            </p>
-            <div className="flex items-center gap-2 justify-end">
+          </section>
+        ) : null}
+
+        <section
+          className="flex min-h-0 flex-col rounded-3xl border p-5"
+          style={{ backgroundColor: "var(--surface-panel)", borderColor: "var(--border-panel)" }}
+        >
+          <div className="mb-4 flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-[18px] font-semibold" style={{ color: "var(--text-primary)" }}>
+                {mode === "full" ? (activeConversation?.title ?? "Conversation") : "HelpeX Chat"}
+              </h2>
+              <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
+                {activeStreamProvider ?? `${provider} • ${model}`}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <button
+                type="button"
+                onClick={handleToggleIncognito}
+                disabled={!isIncognito && toggleLocked}
+                className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm"
+                style={{ borderColor: "var(--border-panel)", color: "var(--text-secondary)" }}
+              >
+                {isIncognito ? <EyeOff size={15} /> : <Eye size={15} />}
+                {isIncognito ? "Incognito" : "Standard"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIncognitoConfirmOpen(true)}
+                className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm"
+                style={{ borderColor: "var(--border-panel)", color: "var(--text-secondary)" }}
+              >
+                <Trash2 size={15} />
+                Wipe
+              </button>
+              {mode === "compact" && onOpenChatPage ? (
+                <button
+                  type="button"
+                  onClick={onOpenChatPage}
+                  className="rounded-xl px-3 py-2 text-sm font-medium"
+                  style={{ backgroundColor: "var(--surface-elevated)", color: "var(--text-primary)" }}
+                >
+                  Open chat
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          {error ? (
+            <div
+              className="mb-4 flex items-center gap-2 rounded-2xl border px-3 py-3 text-sm"
+              style={{ borderColor: "rgba(248, 113, 113, 0.3)", backgroundColor: "rgba(127, 29, 29, 0.12)", color: "var(--status-danger)" }}
+            >
+              <ShieldAlert size={16} />
+              {error}
+            </div>
+          ) : null}
+
+          <div className="mb-4 flex flex-wrap gap-2">
+            {SUGGESTED_ACTIONS.map((action) => (
+              <button
+                key={action}
+                type="button"
+                onClick={() => void handleSend(action)}
+                disabled={isStreaming}
+                className="rounded-full border px-3 py-1.5 text-xs"
+                style={{ borderColor: "var(--border-panel)", color: "var(--text-secondary)" }}
+              >
+                {action}
+              </button>
+            ))}
+            {onOpenSettings ? (
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs"
+                style={{ borderColor: "var(--border-panel)", color: "var(--text-secondary)" }}
+              >
+                <Settings size={13} />
+                Settings
+              </button>
+            ) : null}
+          </div>
+
+          <div className="min-h-0 flex-1">
+            <MessageList messages={visibleMessages} isStreaming={isStreaming} variant={mode} />
+          </div>
+
+          <div className="mt-4">
+            <MessageInput
+              disabled={!activeConversation}
+              isStreaming={isStreaming}
+              onCancel={cancelActiveStream}
+              onSubmit={handleSend}
+              variant={mode}
+            />
+          </div>
+        </section>
+
+        <aside className="flex min-h-0 flex-col gap-4">
+          <section
+            className="rounded-3xl border p-5"
+            style={{ backgroundColor: "var(--surface-panel)", borderColor: "var(--border-panel)" }}
+          >
+            <h3 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+              Runtime
+            </h3>
+            <div className="mt-4 space-y-3 text-sm">
+              <div className="flex items-center justify-between">
+                <span style={{ color: "var(--text-secondary)" }}>Provider</span>
+                <span style={{ color: "var(--text-primary)" }}>{provider}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span style={{ color: "var(--text-secondary)" }}>Model</span>
+                <span style={{ color: "var(--text-primary)" }}>{model}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span style={{ color: "var(--text-secondary)" }}>MCP servers</span>
+                <span style={{ color: "var(--text-primary)" }}>{serverCount}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span style={{ color: "var(--text-secondary)" }}>Tokens</span>
+                <span style={{ color: "var(--text-primary)" }}>{conversationTokenEstimate}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span style={{ color: "var(--text-secondary)" }}>Health</span>
+                <span style={{ color: providerStatus?.healthy ? "var(--status-success)" : "var(--text-muted)" }}>
+                  {providerStatus?.message ?? "Unchecked"}
+                </span>
+              </div>
+            </div>
+          </section>
+
+          <section
+            className="flex min-h-0 flex-1 flex-col rounded-3xl border p-5"
+            style={{ backgroundColor: "var(--surface-panel)", borderColor: "var(--border-panel)" }}
+          >
+            <h3 className="mb-4 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+              MCP Tool Activity
+            </h3>
+            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+              <ToolActivityList
+                activities={toolActivities}
+                approvals={visibleApprovals}
+                approvalBusyId={busyApprovalId}
+                onApprovalDecision={handleApprovalDecision}
+              />
+            </div>
+          </section>
+        </aside>
+      </div>
+
+      {incognitoConfirmOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div
+            className="w-full max-w-md rounded-3xl border p-5"
+            style={{ backgroundColor: "var(--surface-panel-strong)", borderColor: "var(--border-panel)" }}
+          >
+            <h3 className="text-lg font-semibold" style={{ color: "var(--text-primary)" }}>
+              Clear session data?
+            </h3>
+            <p className="mt-2 text-sm" style={{ color: "var(--text-secondary)" }}>
+              {isIncognito
+                ? "This clears the current incognito session and returns to standard mode."
+                : "This wipes stored chats and local session data from the renderer."}
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
                 onClick={() => setIncognitoConfirmOpen(false)}
-                className="cyber-btn cyber-btn-ghost text-xs"
+                className="rounded-xl border px-3 py-2 text-sm"
+                style={{ borderColor: "var(--border-panel)", color: "var(--text-secondary)" }}
               >
                 Cancel
               </button>
               <button
-                onClick={wipeSession}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold"
-                style={{ backgroundColor: 'var(--danger)', color: '#fff', border: 'none' }}
+                type="button"
+                onClick={() => void wipeSession()}
+                className="rounded-xl px-3 py-2 text-sm font-medium"
+                style={{ backgroundColor: "rgba(248, 113, 113, 0.12)", color: "var(--status-danger)" }}
               >
-                <Trash2 size={12} />
-                Wipe & Disable
+                Wipe now
               </button>
             </div>
           </div>
         </div>
-      )}
-    </section>
+      ) : null}
+    </div>
   );
 }

@@ -61,6 +61,10 @@ export const useMcp = () => {
         }
     };
 
+    const respondToPermissionRequest = async (requestId: string, allow: boolean): Promise<void> => {
+        await invoke("mcp_respond_to_permission_request", { requestId, allow });
+    };
+
     const removeNode = async (name: string) => {
         try {
             console.log(`🔌 [MCP Hook] Requesting backend termination for node: ${name}`);
@@ -92,6 +96,7 @@ export const useMcp = () => {
         registerNewNode,
         removeNode,
         refreshActiveTools,
-        executeTool
+        executeTool,
+        respondToPermissionRequest
     };
 };

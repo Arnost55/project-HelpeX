@@ -73,6 +73,7 @@ struct AgentToolEvent {
     summary: Option<String>,
     duration_ms: Option<u128>,
     permission_decision: Option<String>,
+    permission_level: Option<String>,
 }
 
 pub async fn should_use_agent_loop(app_handle: &AppHandle, request: &ChatStreamRequest) -> bool {
@@ -283,6 +284,8 @@ async fn run_with_provider(
                     "unknown".to_string(),
                     tool_call.name.clone(),
                     Some("Tool not found".to_string()),
+                    None,
+                    None,
                 );
                 continue;
             };
@@ -310,6 +313,8 @@ async fn run_with_provider(
                     tool_definition.server_name.clone(),
                     tool_definition.tool_name.clone(),
                     Some("Repeated identical tool call blocked".to_string()),
+                    None,
+                    None,
                 );
                 continue;
             }
@@ -363,6 +368,14 @@ async fn run_with_provider(
                         tool_definition.server_name.clone(),
                         tool_definition.tool_name.clone(),
                         Some(error.message.clone()),
+                        error
+                            .permission
+                            .as_ref()
+                            .map(|permission| format!("{:?}", permission.decision)),
+                        error
+                            .permission
+                            .as_ref()
+                            .map(|permission| format!("{:?}", permission.level)),
                     );
                 }
             }
@@ -449,6 +462,7 @@ fn emit_tool_start(app: &AppHandle, stream_id: &str, server_name: &str, tool_nam
             summary: None,
             duration_ms: None,
             permission_decision: None,
+            permission_level: None,
         },
     );
 }
@@ -471,6 +485,7 @@ fn emit_tool_result(
             summary: Some(summary.to_string()),
             duration_ms: Some(duration_ms),
             permission_decision,
+            permission_level: None,
         },
     );
 }
@@ -481,6 +496,8 @@ fn emit_tool_error(
     server_name: String,
     tool_name: String,
     summary: Option<String>,
+    permission_decision: Option<String>,
+    permission_level: Option<String>,
 ) {
     let _ = app.emit(
         "agent-tool-error",
@@ -490,7 +507,8 @@ fn emit_tool_error(
             tool_name,
             summary,
             duration_ms: None,
-            permission_decision: None,
+            permission_decision,
+            permission_level,
         },
     );
 }

@@ -96,6 +96,7 @@ pub fn run() {
             mcp::mcp_execute_tool,
             mcp::mcp_disconnect_server,
             mcp::mcp_hydrate_saved_servers,
+            mcp::mcp_respond_to_permission_request,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

@@ -6,8 +6,10 @@ mod schema;
 
 use std::collections::HashMap;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
+use std::time::Duration;
 
 use audit::{log_tool_audit, redact_json_value, summarize_json_value, ToolAuditEntry};
 use client::{McpClient, McpClientError};
@@ -22,7 +24,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, State};
 use tokio::io::AsyncBufReadExt;
 use tokio::process::{Child, ChildStderr, Command};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{oneshot, Mutex, RwLock};
 
 const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 const MCP_INIT_TIMEOUT_MS: u64 = 15_000;
@@ -38,9 +40,24 @@ pub struct ActiveServer {
     pub tools: Arc<RwLock<HashMap<String, McpTool>>>,
 }
 
-#[derive(Default)]
 pub struct McpSystemState {
     pub servers: Arc<RwLock<HashMap<String, Arc<ActiveServer>>>>,
+    pub pending_approvals: Arc<Mutex<HashMap<String, PendingApproval>>>,
+    pub approval_sequence: AtomicU64,
+}
+
+pub struct PendingApproval {
+    pub response_tx: oneshot::Sender<bool>,
+}
+
+impl Default for McpSystemState {
+    fn default() -> Self {
+        Self {
+            servers: Arc::new(RwLock::new(HashMap::new())),
+            pending_approvals: Arc::new(Mutex::new(HashMap::new())),
+            approval_sequence: AtomicU64::new(0),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -60,6 +77,17 @@ pub struct ToolExecutionOutcome {
     pub is_error: bool,
     pub duration_ms: u128,
     pub result_summary: String,
+    pub permission: PermissionEvaluation,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolApprovalRequestEvent {
+    pub request_id: String,
+    pub stream_id: Option<String>,
+    pub server_name: String,
+    pub tool_name: String,
+    pub arguments: Value,
     pub permission: PermissionEvaluation,
 }
 
@@ -435,14 +463,26 @@ pub async fn execute_tool(
     })?;
     let permission = evaluate_permission(&policy, &request.server_name, &tool);
 
-    if permission.decision != PermissionDecision::Allow {
-        let error_kind = if permission.decision == PermissionDecision::Ask {
-            ToolExecutionErrorKind::PermissionRequired
-        } else {
-            ToolExecutionErrorKind::PermissionDenied
-        };
+    if permission.decision == PermissionDecision::Ask {
+        let state = app_handle.state::<McpSystemState>();
+        let approved = request_tool_approval(app_handle, &state, &request, &permission).await?;
+        if !approved {
+            let error = ToolExecutionError::new(
+                ToolExecutionErrorKind::PermissionDenied,
+                format!(
+                    "User denied approval for '{}.{}' ({:?})",
+                    request.server_name, request.tool_name, permission.level
+                ),
+            )
+            .with_permission(permission.clone());
+
+            let audit_entry = ToolAuditEntry::from_denied_request(&request, &permission, &error);
+            let _ = log_tool_audit(app_handle, &audit_entry).await;
+            return Err(error);
+        }
+    } else if permission.decision != PermissionDecision::Allow {
         let error = ToolExecutionError::new(
-            error_kind,
+            ToolExecutionErrorKind::PermissionDenied,
             format!(
                 "Permission {:?} for '{}.{}' ({:?})",
                 permission.decision, request.server_name, request.tool_name, permission.level
@@ -674,4 +714,93 @@ pub fn structured_tool_error(error: &ToolExecutionError) -> Value {
 
 pub fn redacted_arguments(value: &Value) -> Value {
     redact_json_value(value)
+}
+
+fn next_approval_request_id(state: &McpSystemState) -> String {
+    let sequence = state.approval_sequence.fetch_add(1, Ordering::Relaxed) + 1;
+    format!("approval_{}", sequence)
+}
+
+async fn request_tool_approval(
+    app_handle: &AppHandle,
+    state: &McpSystemState,
+    request: &ToolExecutionRequest,
+    permission: &PermissionEvaluation,
+) -> Result<bool, ToolExecutionError> {
+    let request_id = next_approval_request_id(state);
+    let (response_tx, response_rx) = oneshot::channel();
+
+    {
+        let mut pending = state.pending_approvals.lock().await;
+        pending.insert(request_id.clone(), PendingApproval { response_tx });
+    }
+
+    let emit_result = app_handle.emit(
+        "agent-tool-approval-request",
+        ToolApprovalRequestEvent {
+            request_id: request_id.clone(),
+            stream_id: request.stream_id.clone(),
+            server_name: request.server_name.clone(),
+            tool_name: request.tool_name.clone(),
+            arguments: redacted_arguments(&request.arguments),
+            permission: permission.clone(),
+        },
+    );
+
+    if let Err(error) = emit_result {
+        let mut pending = state.pending_approvals.lock().await;
+        pending.remove(&request_id);
+        return Err(
+            ToolExecutionError::new(
+                ToolExecutionErrorKind::PermissionRequired,
+                format!("Failed to emit approval request: {}", error),
+            )
+            .with_permission(permission.clone()),
+        );
+    }
+
+    match tokio::time::timeout(Duration::from_secs(300), response_rx).await {
+        Ok(Ok(approved)) => Ok(approved),
+        Ok(Err(_)) => Err(
+            ToolExecutionError::new(
+                ToolExecutionErrorKind::PermissionRequired,
+                format!(
+                    "Approval channel closed for '{}.{}'",
+                    request.server_name, request.tool_name
+                ),
+            )
+            .with_permission(permission.clone()),
+        ),
+        Err(_) => {
+            let mut pending = state.pending_approvals.lock().await;
+            pending.remove(&request_id);
+            Err(
+                ToolExecutionError::new(
+                    ToolExecutionErrorKind::PermissionRequired,
+                    format!(
+                        "Approval timed out for '{}.{}'",
+                        request.server_name, request.tool_name
+                    ),
+                )
+                .with_permission(permission.clone()),
+            )
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn mcp_respond_to_permission_request(
+    state: State<'_, McpSystemState>,
+    request_id: String,
+    allow: bool,
+) -> Result<(), String> {
+    let mut pending = state.pending_approvals.lock().await;
+    let approval = pending
+        .remove(&request_id)
+        .ok_or_else(|| format!("Approval request '{}' was not found", request_id))?;
+
+    approval
+        .response_tx
+        .send(allow)
+        .map_err(|_| format!("Approval request '{}' is no longer waiting", request_id))
 }

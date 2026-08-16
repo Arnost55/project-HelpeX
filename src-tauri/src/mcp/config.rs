@@ -11,11 +11,17 @@ pub struct McpServerEnvironmentEntry {
     pub value: Option<String>,
     #[serde(default)]
     pub secret: bool,
+    #[serde(default)]
+    pub secret_ref: Option<String>,
+    #[serde(default)]
+    pub configured: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PersistedServerConfig {
+    #[serde(default)]
+    pub id: String,
     pub name: String,
     #[serde(default = "default_transport")]
     pub transport: String,
@@ -33,6 +39,8 @@ pub struct PersistedServerConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServerConfigInput {
+    #[serde(default)]
+    pub id: Option<String>,
     pub name: String,
     #[serde(default = "default_transport")]
     pub transport: String,
@@ -48,9 +56,14 @@ pub struct McpServerConfigInput {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum McpServerStatus {
+    Stopped,
     Starting,
+    Initializing,
     Connected,
-    Failed,
+    Restarting,
+    Stopping,
+    Error,
+    NeedsCredentials,
     Disconnected,
     Disabled,
 }
@@ -69,6 +82,7 @@ pub struct McpToolView {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServerView {
+    pub id: String,
     pub name: String,
     pub transport: String,
     pub cmd: String,

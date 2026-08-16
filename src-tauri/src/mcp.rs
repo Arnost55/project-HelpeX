@@ -8,6 +8,7 @@ mod schema;
 
 use std::collections::{HashMap, HashSet};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -35,6 +36,7 @@ use tokio::sync::{oneshot, Mutex, RwLock};
 use uuid::Uuid;
 
 use crate::agent::cancellation::StreamCancellationToken;
+use crate::secret_store::secret_store;
 
 const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 const MCP_INIT_TIMEOUT_MS: u64 = 15_000;
@@ -42,6 +44,7 @@ const MCP_LIST_TOOLS_TIMEOUT_MS: u64 = 15_000;
 const MCP_TOOL_CALL_TIMEOUT_MS: u64 = 30_000;
 
 pub struct ActiveServer {
+    pub id: String,
     pub name: String,
     pub cmd: String,
     pub args: Vec<String>,
@@ -49,12 +52,27 @@ pub struct ActiveServer {
     pub client: Arc<McpClient>,
     pub tools: Arc<RwLock<HashMap<String, McpTool>>>,
     pub disabled_tools: Arc<RwLock<HashSet<String>>>,
+    pub stop_requested: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ServerRuntimeState {
     pub status: McpServerStatus,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct McpServerStateChangedEvent {
+    server_name: String,
+    status: McpServerStatus,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct McpToolsChangedEvent {
+    server_name: String,
 }
 
 pub struct McpSystemState {
@@ -405,6 +423,38 @@ fn spawn_stderr_logger(name: String, stderr: ChildStderr) {
     });
 }
 
+fn spawn_process_monitor(app_handle: AppHandle, server: Arc<ActiveServer>) {
+    tokio::spawn(async move {
+        let exit_status = {
+            let mut child = server.process.lock().await;
+            child.wait().await
+        };
+
+        let state = app_handle.state::<McpSystemState>();
+        let was_stop_requested = server.stop_requested.load(Ordering::SeqCst);
+
+        {
+            let mut active_map = state.servers.write().await;
+            active_map.remove(&server.name);
+        }
+
+        invalidate_approvals_for_server(&app_handle, &state, &server.name).await;
+        emit_tools_changed(&app_handle, &server.name);
+
+        let (status, error) = if was_stop_requested {
+            (McpServerStatus::Stopped, None)
+        } else {
+            let message = match exit_status {
+                Ok(status) => format!("Process exited unexpectedly with status {}", status),
+                Err(error) => format!("Failed to observe process exit: {}", error),
+            };
+            (McpServerStatus::Error, Some(message))
+        };
+
+        set_runtime_state(&app_handle, &state, &server.name, status, error).await;
+    });
+}
+
 fn to_tool_map(tools: Vec<McpTool>) -> HashMap<String, McpTool> {
     tools
         .into_iter()
@@ -455,6 +505,7 @@ async fn get_active_server(state: &McpSystemState, name: &str) -> Option<Arc<Act
 }
 
 async fn set_runtime_state(
+    app_handle: &AppHandle,
     state: &McpSystemState,
     server_name: &str,
     status: McpServerStatus,
@@ -465,10 +516,96 @@ async fn set_runtime_state(
         server_name.to_string(),
         ServerRuntimeState { status, error },
     );
+
+    let current = runtime.get(server_name).cloned();
+    drop(runtime);
+
+    if let Some(current) = current {
+        let _ = app_handle.emit(
+            "mcp-server-state-changed",
+            McpServerStateChangedEvent {
+                server_name: server_name.to_string(),
+                status: current.status,
+                error: current.error,
+            },
+        );
+    }
+}
+
+fn emit_tools_changed(app_handle: &AppHandle, server_name: &str) {
+    let _ = app_handle.emit(
+        "mcp-tools-changed",
+        McpToolsChangedEvent {
+            server_name: server_name.to_string(),
+        },
+    );
+}
+
+fn resolve_server_config_secrets(
+    app_handle: &AppHandle,
+    config: &PersistedServerConfig,
+) -> Result<PersistedServerConfig, String> {
+    let store = secret_store(app_handle);
+    let mut resolved = config.clone();
+
+    for entry in &mut resolved.env {
+        if !entry.secret {
+            entry.secret_ref = None;
+            entry.configured = entry.value.as_ref().is_some_and(|value| !value.trim().is_empty());
+            continue;
+        }
+
+        if let Some(secret_ref) = entry.secret_ref.as_deref() {
+            let value = store.get(secret_ref)?;
+            entry.configured = value.is_some();
+            entry.value = value;
+        } else {
+            entry.configured = false;
+            entry.value = None;
+        }
+    }
+
+    Ok(resolved)
+}
+
+fn persist_server_secrets(
+    app_handle: &AppHandle,
+    config: &mut PersistedServerConfig,
+) -> Result<(), String> {
+    let store = secret_store(app_handle);
+
+    for entry in &mut config.env {
+        if !entry.secret {
+            if let Some(secret_ref) = entry.secret_ref.take() {
+                store.delete(&secret_ref)?;
+            }
+            entry.configured = entry.value.as_ref().is_some_and(|value| !value.trim().is_empty());
+            continue;
+        }
+
+        let secret_ref = entry
+            .secret_ref
+            .clone()
+            .unwrap_or_else(|| crate::secret_store::SecretStore::mcp_env_secret_ref(&config.id, &entry.name));
+
+        if let Some(value) = entry.value.as_ref().filter(|value| !value.trim().is_empty()) {
+            store.set(&secret_ref, value)?;
+            entry.secret_ref = Some(secret_ref);
+            entry.configured = true;
+        } else {
+            entry.secret_ref = Some(secret_ref.clone());
+            entry.configured = store.get(&secret_ref)?.is_some();
+        }
+
+        entry.value = None;
+    }
+
+    Ok(())
 }
 
 fn normalize_server_config(input: McpServerConfigInput) -> PersistedServerConfig {
     PersistedServerConfig {
+        id: input.id.unwrap_or_else(|| Uuid::new_v4().to_string()),
         name: input.name,
         transport: input.transport,
         cmd: input.cmd,
@@ -490,6 +627,8 @@ fn visible_env(entries: &[McpServerEnvironmentEntry]) -> Vec<McpServerEnvironmen
                 entry.value.clone()
             },
             secret: entry.secret,
+            secret_ref: entry.secret_ref.clone(),
+            configured: entry.secret && entry.secret_ref.is_some(),
         })
         .collect()
 }
@@ -505,11 +644,15 @@ mod config_tests {
                 name: "TOKEN".to_string(),
                 value: Some("super-secret".to_string()),
                 secret: true,
+                secret_ref: Some("mcp/server/TOKEN".to_string()),
+                configured: true,
             },
             McpServerEnvironmentEntry {
                 name: "URL".to_string(),
                 value: Some("http://localhost".to_string()),
                 secret: false,
+                secret_ref: None,
+                configured: true,
             },
         ];
 
@@ -521,6 +664,7 @@ mod config_tests {
     #[test]
     fn normalize_server_config_initializes_disabled_tools() {
         let config = normalize_server_config(McpServerConfigInput {
+            id: None,
             name: "filesystem".to_string(),
             transport: "stdio".to_string(),
             cmd: "npx".to_string(),
@@ -540,11 +684,11 @@ mod config_tests {
 
 async fn spawn_and_register_server(
     app_handle: &AppHandle,
-    config: PersistedServerConfig,
+    mut config: PersistedServerConfig,
     persist_config: bool,
 ) -> Result<Vec<McpTool>, String> {
     let state = app_handle.state::<McpSystemState>();
-    set_runtime_state(&state, &config.name, McpServerStatus::Starting, None).await;
+    set_runtime_state(app_handle, &state, &config.name, McpServerStatus::Starting, None).await;
 
     if let Some(existing) = get_active_server(&state, &config.name).await {
         if existing.cmd == config.cmd && existing.args == config.args {
@@ -564,11 +708,43 @@ async fn spawn_and_register_server(
         ));
     }
 
+    persist_server_secrets(app_handle, &mut config)?;
+    let resolved = resolve_server_config_secrets(app_handle, &config)?;
+    if resolved
+        .env
+        .iter()
+        .any(|entry| entry.secret && entry.value.is_none())
+    {
+        set_runtime_state(
+            app_handle,
+            &state,
+            &config.name,
+            McpServerStatus::NeedsCredentials,
+            Some("One or more secret environment variables are missing".to_string()),
+        )
+        .await;
+        return Err(format!(
+            "MCP server '{}' needs credentials before it can start",
+            config.name
+        ));
+    }
+
+    set_runtime_state(
+        app_handle,
+        &state,
+        &config.name,
+        McpServerStatus::Initializing,
+        None,
+    )
+    .await;
+
     let (child, client) =
-        spawn_server_process(&config.name, &config.cmd, &config.args, &config.env).await?;
+        spawn_server_process(&config.name, &config.cmd, &config.args, &resolved.env).await?;
     let tools = initialize_server(&config.name, &client).await?;
+    let stop_requested = Arc::new(AtomicBool::new(false));
 
     let server = Arc::new(ActiveServer {
+        id: config.id.clone(),
         name: config.name.clone(),
         cmd: config.cmd.clone(),
         args: config.args.clone(),
@@ -582,16 +758,25 @@ async fn spawn_and_register_server(
                 .cloned()
                 .collect::<HashSet<_>>(),
         )),
+        stop_requested: stop_requested.clone(),
     });
 
-    upsert_active_server(&state, server).await?;
-    set_runtime_state(&state, &config.name, McpServerStatus::Connected, None).await;
+    upsert_active_server(&state, server.clone()).await?;
+    set_runtime_state(
+        app_handle,
+        &state,
+        &config.name,
+        McpServerStatus::Connected,
+        None,
+    )
+    .await;
+    emit_tools_changed(app_handle, &config.name);
 
     if persist_config {
         let mut persisted = load_persisted_servers(app_handle).unwrap_or_default();
         if let Some(position) = persisted
             .iter()
-            .position(|server| server.name == config.name)
+            .position(|server| server.id == config.id)
         {
             persisted[position] = config.clone();
         } else {
@@ -600,6 +785,7 @@ async fn spawn_and_register_server(
         save_persisted_servers(app_handle, &persisted)?;
     }
 
+    spawn_process_monitor(app_handle.clone(), server);
     Ok(tools)
 }
 
@@ -787,6 +973,7 @@ pub async fn mcp_spawn_and_initialize(
     spawn_and_register_server(
         &app_handle,
         PersistedServerConfig {
+            id: Uuid::new_v4().to_string(),
             name,
             transport: "stdio".to_string(),
             cmd,
@@ -863,6 +1050,14 @@ pub async fn mcp_execute_tool(
 #[tauri::command]
 pub async fn mcp_disconnect_server(app_handle: AppHandle, name: String) -> Result<(), String> {
     let state = app_handle.state::<McpSystemState>();
+    set_runtime_state(
+        &app_handle,
+        &state,
+        &name,
+        McpServerStatus::Stopping,
+        None,
+    )
+    .await;
 
     let server = {
         let mut active_map = state.servers.write().await;
@@ -875,6 +1070,7 @@ pub async fn mcp_disconnect_server(app_handle: AppHandle, name: String) -> Resul
 
     invalidate_approvals_for_server(&app_handle, &state, &name).await;
 
+    server.stop_requested.store(true, Ordering::SeqCst);
     server.client.close().await;
 
     let mut child = server.process.lock().await;
@@ -882,7 +1078,15 @@ pub async fn mcp_disconnect_server(app_handle: AppHandle, name: String) -> Resul
         .kill()
         .await
         .map_err(|error| format!("Failed to terminate '{}': {}", name, error))?;
-    set_runtime_state(&state, &name, McpServerStatus::Disconnected, None).await;
+    set_runtime_state(
+        &app_handle,
+        &state,
+        &name,
+        McpServerStatus::Stopped,
+        None,
+    )
+    .await;
+    emit_tools_changed(&app_handle, &name);
 
     Ok(())
 }
@@ -900,9 +1104,10 @@ pub async fn mcp_hydrate_saved_servers(app_handle: AppHandle) -> Result<(), Stri
             if let Err(error) = spawn_and_register_server(&handle, server, false).await {
                 let state = handle.state::<McpSystemState>();
                 set_runtime_state(
+                    &handle,
                     &state,
                     &server_name,
-                    McpServerStatus::Failed,
+                    McpServerStatus::Error,
                     Some(error.clone()),
                 )
                 .await;
@@ -923,6 +1128,7 @@ pub async fn auto_spawn_and_register(
     spawn_and_register_server(
         app_handle,
         PersistedServerConfig {
+            id: Uuid::new_v4().to_string(),
             name: name.to_string(),
             transport: "stdio".to_string(),
             cmd: cmd.to_string(),
@@ -999,7 +1205,37 @@ pub fn load_persisted_servers(
     }
 
     let json = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
-    serde_json::from_str(&json).map_err(|error| error.to_string())
+    let mut configs: Vec<PersistedServerConfig> =
+        serde_json::from_str(&json).map_err(|error| error.to_string())?;
+    let mut changed = false;
+
+    for config in &mut configs {
+        if config.id.trim().is_empty() {
+            config.id = Uuid::new_v4().to_string();
+            changed = true;
+        }
+
+        for entry in &mut config.env {
+            if entry.secret && entry.secret_ref.is_none() {
+                entry.secret_ref = Some(crate::secret_store::SecretStore::mcp_env_secret_ref(
+                    &config.id,
+                    &entry.name,
+                ));
+                changed = true;
+            }
+
+            if entry.secret {
+                entry.configured = entry.secret_ref.is_some();
+                entry.value = None;
+            }
+        }
+    }
+
+    if changed {
+        save_persisted_servers(app_handle, &configs)?;
+    }
+
+    Ok(configs)
 }
 
 async fn build_server_view(
@@ -1052,6 +1288,7 @@ async fn build_server_view(
     let disabled_tool_count = tools.iter().filter(|tool| !tool.enabled).count();
 
     McpServerView {
+        id: config.id.clone(),
         name: config.name.clone(),
         transport: config.transport.clone(),
         cmd: config.cmd.clone(),
@@ -1095,22 +1332,34 @@ pub async fn mcp_upsert_server(
     app_handle: AppHandle,
     config: McpServerConfigInput,
 ) -> Result<McpServerView, String> {
+    let requested_id = config.id.clone();
     let config = normalize_server_config(config);
     let mut configs = load_persisted_servers(&app_handle)?;
-    let existing_disabled_tools = configs
+    let existing = configs
         .iter()
-        .find(|item| item.name == config.name)
-        .map(|item| item.disabled_tools.clone())
-        .unwrap_or_default();
+        .find(|item| {
+            requested_id
+                .as_ref()
+                .is_some_and(|id| item.id == *id)
+                || item.name == config.name
+        })
+        .cloned();
 
     let persisted_config = PersistedServerConfig {
-        disabled_tools: existing_disabled_tools,
+        id: existing
+            .as_ref()
+            .map(|item| item.id.clone())
+            .unwrap_or(config.id),
+        disabled_tools: existing
+            .as_ref()
+            .map(|item| item.disabled_tools.clone())
+            .unwrap_or_default(),
         ..config
     };
 
     if let Some(position) = configs
         .iter()
-        .position(|item| item.name == persisted_config.name)
+        .position(|item| item.id == persisted_config.id)
     {
         configs[position] = persisted_config.clone();
     } else {
@@ -1121,6 +1370,7 @@ pub async fn mcp_upsert_server(
     let state = app_handle.state::<McpSystemState>();
     if persisted_config.enabled {
         if let Some(active) = get_active_server(&state, &persisted_config.name).await {
+            active.stop_requested.store(true, Ordering::SeqCst);
             active.client.close().await;
             let mut child = active.process.lock().await;
             let _ = child.kill().await;
@@ -1131,9 +1381,10 @@ pub async fn mcp_upsert_server(
             spawn_and_register_server(&app_handle, persisted_config.clone(), false).await
         {
             set_runtime_state(
+                &app_handle,
                 &state,
                 &persisted_config.name,
-                McpServerStatus::Failed,
+                McpServerStatus::Error,
                 Some(error.clone()),
             )
             .await;
@@ -1171,6 +1422,14 @@ pub async fn mcp_delete_server(app_handle: AppHandle, name: String) -> Result<()
     }
 
     let mut configs = load_persisted_servers(&app_handle)?;
+    if let Some(config) = configs.iter().find(|config| config.name == name) {
+        let store = secret_store(&app_handle);
+        for entry in &config.env {
+            if let Some(secret_ref) = entry.secret_ref.as_deref() {
+                let _ = store.delete(secret_ref);
+            }
+        }
+    }
     configs.retain(|config| config.name != name);
     save_persisted_servers(&app_handle, &configs)?;
     app_handle
@@ -1197,6 +1456,14 @@ pub async fn mcp_restart_server(
         .await
         .is_some()
     {
+        set_runtime_state(
+            &app_handle,
+            &app_handle.state::<McpSystemState>(),
+            &config.name,
+            McpServerStatus::Restarting,
+            None,
+        )
+        .await;
         mcp_disconnect_server(app_handle.clone(), config.name.clone()).await?;
     }
 
@@ -1294,6 +1561,7 @@ pub async fn mcp_set_tool_enabled(
             disabled.insert(tool_name.clone());
         }
     }
+    emit_tools_changed(&app_handle, &server_name);
 
     let view = build_server_view(
         &app_handle,

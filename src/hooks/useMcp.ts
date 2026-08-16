@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   deleteMcpServer,
   listMcpServers,
@@ -153,6 +154,27 @@ export const useMcp = () => {
       .finally(() => {
         void refreshServers();
       });
+  }, [refreshServers]);
+
+  useEffect(() => {
+    let unlistenState: (() => void) | undefined;
+    let unlistenTools: (() => void) | undefined;
+
+    async function bind() {
+      unlistenState = await listen("mcp-server-state-changed", () => {
+        void refreshServers();
+      });
+      unlistenTools = await listen("mcp-tools-changed", () => {
+        void refreshServers();
+      });
+    }
+
+    void bind();
+
+    return () => {
+      unlistenState?.();
+      unlistenTools?.();
+    };
   }, [refreshServers]);
 
   return {

@@ -2,7 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { X, RefreshCw, CheckCircle2, AlertCircle, PlugZap, Brain, Palette, Settings2 } from "lucide-react";
 import { useSettingsStore } from "../store/settingsStore";
-import { checkProviderHealth, listProviderModels, listSupportedProviders } from "../api/providers";
+import {
+  checkProviderHealth,
+  listProviderModels,
+  listProviderSecretStatuses,
+  listSupportedProviders,
+  removeProviderSecret,
+  storeProviderSecret,
+} from "../api/providers";
 import { getAvailableThemes, type ThemeDefinition } from "../api/settingsApi";
 import { McpControlCenter } from "../components/McpControlCenter";
 import type { ProviderDefinition, ProviderHealthStatus, ProviderId } from "../types/provider";
@@ -111,6 +118,8 @@ export default function Settings({
   const [modelLoadError, setModelLoadError] = useState<string | null>(null);
   const [manualModelEntry, setManualModelEntry] = useState("");
   const [checkingHealth, setCheckingHealth] = useState(false);
+  const [providerSecretStatuses, setProviderSecretStatuses] = useState<Record<string, boolean>>({});
+  const [savingSecret, setSavingSecret] = useState(false);
 
   const providerDefinition = useMemo(
     () => supportedProviders.find((item) => item.id === provider),
@@ -142,6 +151,7 @@ export default function Settings({
       return;
     }
     void listSupportedProviders().then(setSupportedProviders);
+    void listProviderSecretStatuses().then(setProviderSecretStatuses).catch(() => undefined);
     void getAvailableThemes().then(setAvailableThemes).catch(() => undefined);
   }, [isOpen]);
 
@@ -167,6 +177,13 @@ export default function Settings({
       default:
         return undefined;
     }
+  }
+
+  function setApiKey(selectedProvider: ProviderId, value: string): void {
+    if (selectedProvider === "openai") setOpenAiApiKey(value);
+    if (selectedProvider === "claude") setClaudeApiKey(value);
+    if (selectedProvider === "groq") setGroqApiKey(value);
+    if (selectedProvider === "together") setTogetherApiKey(value);
   }
 
   function getBaseUrl(selectedProvider: ProviderId): string | undefined {
@@ -254,6 +271,37 @@ export default function Settings({
       });
     } finally {
       setCheckingHealth(false);
+    }
+  }
+
+  async function handleSaveSecret(): Promise<void> {
+    const apiKey = getApiKey(provider);
+    if (!apiKey) {
+      return;
+    }
+
+    setSavingSecret(true);
+    try {
+      await storeProviderSecret(provider, apiKey);
+      setApiKey(provider, "");
+      const statuses = await listProviderSecretStatuses();
+      setProviderSecretStatuses(statuses);
+      await runHealthCheck();
+      await loadModels(true);
+    } finally {
+      setSavingSecret(false);
+    }
+  }
+
+  async function handleRemoveSecret(): Promise<void> {
+    setSavingSecret(true);
+    try {
+      await removeProviderSecret(provider);
+      setApiKey(provider, "");
+      const statuses = await listProviderSecretStatuses();
+      setProviderSecretStatuses(statuses);
+    } finally {
+      setSavingSecret(false);
     }
   }
 
@@ -392,6 +440,33 @@ export default function Settings({
                       style={{ backgroundColor: "var(--surface-elevated)", borderColor: "var(--border-panel)" }}
                       placeholder="Enter provider credential"
                     />
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                        {providerSecretStatuses[provider]
+                          ? "Stored securely in the operating system credential store."
+                          : "Not stored securely yet."}
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void handleSaveSecret()}
+                          disabled={savingSecret || !getApiKey(provider)}
+                          className="rounded-xl border px-3 py-2 text-xs"
+                          style={{ borderColor: "var(--border-panel)", color: "var(--text-secondary)" }}
+                        >
+                          {savingSecret ? "Saving..." : "Save securely"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleRemoveSecret()}
+                          disabled={savingSecret || !providerSecretStatuses[provider]}
+                          className="rounded-xl border px-3 py-2 text-xs"
+                          style={{ borderColor: "rgba(249, 115, 115, 0.25)", color: "var(--status-danger)" }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
                   </label>
                 ) : null}
 

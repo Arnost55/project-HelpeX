@@ -17,6 +17,7 @@ use jarvis_core::models::{
 use crate::agent;
 use crate::agent::cancellation::{StreamCancellationRegistry, StreamCancellationToken};
 use crate::provider_registry::{self, ProviderDefinition};
+use crate::secret_store::secret_store;
 
 #[derive(Clone)]
 struct ProviderConfig {
@@ -25,6 +26,62 @@ struct ProviderConfig {
     api_key: Option<String>,
     base_url: Option<String>,
     fallback_used: bool,
+}
+
+fn provider_api_key_ref(provider: &str) -> String {
+    crate::secret_store::SecretStore::provider_api_key_ref(provider)
+}
+
+fn provider_requires_api_key(provider: &str) -> bool {
+    provider_registry::provider_definition(provider)
+        .map(|definition| definition.requires_api_key)
+        .unwrap_or(false)
+}
+
+fn resolve_provider_request(
+    app: &AppHandle,
+    mut request: ProviderRequest,
+) -> Result<ProviderRequest, String> {
+    if request
+        .api_key
+        .as_ref()
+        .is_some_and(|value| !value.trim().is_empty())
+        || !provider_requires_api_key(&request.provider)
+    {
+        return Ok(request);
+    }
+
+    request.api_key = secret_store(app).get(&provider_api_key_ref(&request.provider))?;
+    Ok(request)
+}
+
+fn hydrate_stream_request(
+    app: &AppHandle,
+    mut request: ChatStreamRequest,
+) -> Result<ChatStreamRequest, String> {
+    if provider_requires_api_key(&request.provider)
+        && request
+            .api_key
+            .as_ref()
+            .is_none_or(|value| value.trim().is_empty())
+    {
+        request.api_key = secret_store(app).get(&provider_api_key_ref(&request.provider))?;
+    }
+
+    if let Some(fallback_provider) = request.fallback_provider.clone() {
+        if fallback_provider != "none"
+            && provider_requires_api_key(&fallback_provider)
+            && request
+                .fallback_api_key
+                .as_ref()
+                .is_none_or(|value| value.trim().is_empty())
+        {
+            request.fallback_api_key =
+                secret_store(app).get(&provider_api_key_ref(&fallback_provider))?;
+        }
+    }
+
+    Ok(request)
 }
 
 fn parse_provider_error(raw: &str) -> String {
@@ -1042,6 +1099,7 @@ pub fn load_user_profile(app: AppHandle) -> Result<Option<UserProfile>, String> 
 
 #[tauri::command]
 pub async fn stream_chat(app: AppHandle, request: ChatStreamRequest) -> Result<(), String> {
+    let request = hydrate_stream_request(&app, request)?;
     if request.provider.trim().is_empty() {
         return Err("Missing provider".to_string());
     }
@@ -1119,7 +1177,49 @@ pub fn list_supported_providers() -> Vec<ProviderDefinition> {
 }
 
 #[tauri::command]
-pub async fn list_provider_models(request: ProviderRequest) -> Result<Vec<String>, String> {
+pub fn list_provider_secret_statuses(app: AppHandle) -> Result<HashMap<String, bool>, String> {
+    let store = secret_store(&app);
+    let mut statuses = HashMap::new();
+
+    for provider in provider_registry::supported_providers() {
+        let configured = if provider.requires_api_key {
+            store
+                .get(&provider_api_key_ref(&provider.id))?
+                .is_some_and(|value| !value.trim().is_empty())
+        } else {
+            false
+        };
+        statuses.insert(provider.id, configured);
+    }
+
+    Ok(statuses)
+}
+
+#[tauri::command]
+pub fn store_provider_secret(
+    app: AppHandle,
+    provider: String,
+    api_key: String,
+) -> Result<(), String> {
+    let normalized = api_key.trim();
+    if normalized.is_empty() {
+        return Err("API key cannot be empty".to_string());
+    }
+
+    secret_store(&app).set(&provider_api_key_ref(&provider), normalized)
+}
+
+#[tauri::command]
+pub fn remove_provider_secret(app: AppHandle, provider: String) -> Result<(), String> {
+    secret_store(&app).delete(&provider_api_key_ref(&provider))
+}
+
+#[tauri::command]
+pub async fn list_provider_models(
+    app: AppHandle,
+    request: ProviderRequest,
+) -> Result<Vec<String>, String> {
+    let request = resolve_provider_request(&app, request)?;
     match request.provider.as_str() {
         "openai" => {
             let api_key = request
@@ -1162,8 +1262,10 @@ pub async fn list_provider_models(request: ProviderRequest) -> Result<Vec<String
 
 #[tauri::command]
 pub async fn check_provider_health(
+    app: AppHandle,
     request: ProviderRequest,
 ) -> Result<ProviderHealthResponse, String> {
+    let request = resolve_provider_request(&app, request)?;
     let started = Instant::now();
 
     let response = match request.provider.as_str() {

@@ -16,6 +16,7 @@ import { useMcp } from "../hooks/useMcp";
 import type { McpServerConfigInput, McpServerEnvironmentEntry, McpServerView } from "../types/mcp";
 
 interface EditableServerForm {
+  id: string | null;
   originalName: string | null;
   name: string;
   transport: string;
@@ -27,6 +28,7 @@ interface EditableServerForm {
 
 function emptyForm(): EditableServerForm {
   return {
+    id: null,
     originalName: null,
     name: "",
     transport: "stdio",
@@ -48,10 +50,20 @@ function statusTone(status: McpServerView["status"]): { label: string; color: st
   switch (status) {
     case "CONNECTED":
       return { label: "Connected", color: "var(--status-success)" };
+    case "INITIALIZING":
+      return { label: "Initializing", color: "var(--status-warning)" };
     case "STARTING":
       return { label: "Starting", color: "var(--status-warning)" };
-    case "FAILED":
-      return { label: "Failed", color: "var(--status-danger)" };
+    case "RESTARTING":
+      return { label: "Restarting", color: "var(--status-warning)" };
+    case "STOPPING":
+      return { label: "Stopping", color: "var(--text-muted)" };
+    case "STOPPED":
+      return { label: "Stopped", color: "var(--text-muted)" };
+    case "ERROR":
+      return { label: "Error", color: "var(--status-danger)" };
+    case "NEEDS_CREDENTIALS":
+      return { label: "Needs credentials", color: "var(--status-warning)" };
     case "DISABLED":
       return { label: "Disabled", color: "var(--text-muted)" };
     default:
@@ -83,6 +95,7 @@ export function McpControlCenter(): JSX.Element {
 
   function loadServerIntoForm(server: McpServerView): void {
     setForm({
+      id: server.id,
       originalName: server.name,
       name: server.name,
       transport: server.transport,
@@ -98,6 +111,7 @@ export function McpControlCenter(): JSX.Element {
     setBusyKey("save");
     try {
       const payload: McpServerConfigInput = {
+        id: form.id,
         name: form.name.trim(),
         transport: form.transport,
         cmd: form.cmd.trim(),
@@ -109,6 +123,8 @@ export function McpControlCenter(): JSX.Element {
             name: entry.name.trim(),
             value: entry.secret ? entry.value?.trim() || undefined : entry.value?.trim() || undefined,
             secret: entry.secret,
+            secretRef: entry.secretRef,
+            configured: entry.configured,
           })),
       };
 
@@ -246,7 +262,7 @@ export function McpControlCenter(): JSX.Element {
               onClick={() =>
                 setForm((current) => ({
                   ...current,
-                  env: [...current.env, { name: "", value: "", secret: true }],
+                  env: [...current.env, { name: "", value: "", secret: true, configured: false }],
                 }))
               }
               className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm"

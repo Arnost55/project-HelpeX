@@ -2,6 +2,8 @@ export interface McpServerEnvironmentEntry {
   name: string;
   value?: string | null;
   secret: boolean;
+  secretRef?: string | null;
+  configured: boolean;
 }
 
 export interface McpPermissionEvaluation {
@@ -20,13 +22,19 @@ export interface McpToolView {
 }
 
 export type McpServerStatus =
+  | "STOPPED"
   | "STARTING"
+  | "INITIALIZING"
   | "CONNECTED"
-  | "FAILED"
+  | "RESTARTING"
+  | "STOPPING"
+  | "ERROR"
+  | "NEEDS_CREDENTIALS"
   | "DISCONNECTED"
   | "DISABLED";
 
 export interface McpServerView {
+  id: string;
   name: string;
   transport: string;
   cmd: string;
@@ -41,6 +49,7 @@ export interface McpServerView {
 }
 
 export interface McpServerConfigInput {
+  id?: string | null;
   name: string;
   transport: string;
   cmd: string;

@@ -4,6 +4,7 @@ mod hotkeys;
 mod mcp;
 mod notifications;
 mod provider_registry;
+mod secret_store;
 mod tray;
 
 use crate::agent::cancellation::StreamCancellationRegistry;
@@ -86,6 +87,9 @@ pub fn run() {
             commands::stream_chat,
             commands::cancel_chat_stream,
             commands::list_supported_providers,
+            commands::list_provider_secret_statuses,
+            commands::store_provider_secret,
+            commands::remove_provider_secret,
             commands::list_provider_models,
             commands::check_provider_health,
             commands::save_app_settings,

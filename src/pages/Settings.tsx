@@ -98,6 +98,7 @@ export default function Settings({
   const togetherBaseUrl = useSettingsStore((state) => state.togetherBaseUrl);
   const temperature = useSettingsStore((state) => state.temperature);
   const maxTokens = useSettingsStore((state) => state.maxTokens);
+  const setup = useSettingsStore((state) => state.setup);
   const providerHealth = useSettingsStore((state) => state.providerHealth);
   const setProvider = useSettingsStore((state) => state.setProvider);
   const setModel = useSettingsStore((state) => state.setModel);
@@ -111,6 +112,7 @@ export default function Settings({
   const setTemperature = useSettingsStore((state) => state.setTemperature);
   const setMaxTokens = useSettingsStore((state) => state.setMaxTokens);
   const setProviderHealth = useSettingsStore((state) => state.setProviderHealth);
+  const setSetupState = useSettingsStore((state) => state.setSetupState);
   const syncProviderSecretStatuses = useSettingsStore((state) => state.setProviderSecretStatuses);
   const [supportedProviders, setSupportedProviders] = useState<ProviderDefinition[]>([]);
   const [availableThemes, setAvailableThemes] = useState<ThemeDefinition[]>([]);
@@ -655,7 +657,28 @@ export default function Settings({
                 <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
                   Provider selection, non-secret settings, and configured MCP integrations are stored locally. Secrets are no longer persisted in the settings store.
                 </p>
+                <div className="mt-4 rounded-2xl border px-4 py-3 text-sm" style={{ borderColor: "var(--border-panel)", backgroundColor: "var(--surface-elevated)" }}>
+                  <p style={{ color: "var(--text-secondary)" }}>Setup status</p>
+                  <p className="mt-1 font-medium" style={{ color: "var(--text-primary)" }}>
+                    {setup.completed ? "Completed" : "Pending"}
+                  </p>
+                </div>
                 <div className="mt-4 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSetupState({
+                        completed: false,
+                        version: setup.version || 1,
+                      });
+                      onClose();
+                    }}
+                    className="inline-flex items-center gap-2 rounded-2xl border px-4 py-2 text-sm"
+                    style={{ borderColor: "var(--border-panel)", color: "var(--text-secondary)" }}
+                  >
+                    <RefreshCw size={14} />
+                    Run setup again
+                  </button>
                   <button
                     type="button"
                     onClick={() => {

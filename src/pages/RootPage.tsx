@@ -4,6 +4,7 @@ import CommandPalette from "../components/CommandPalette";
 import AppShell from "../components/layout/AppShell";
 import Panel from "../components/dashboard/Panel";
 import { McpControlCenter } from "../components/McpControlCenter";
+import SetupWizard from "../components/onboarding/SetupWizard";
 import ActivityExplorer from "../components/runtime/ActivityExplorer";
 import { listProviderSecretStatuses } from "../api/providers";
 import { loadUserProfile } from "../api/userProfile";
@@ -83,6 +84,8 @@ export default function RootPage(): JSX.Element {
   const setTheme = useSettingsStore((state) => state.setTheme);
   const hydrateFromConfig = useSettingsStore((state) => state.hydrateFromConfig);
   const hydrated = useSettingsStore((state) => state.hydrated);
+  const setup = useSettingsStore((state) => state.setup);
+  const setSetupState = useSettingsStore((state) => state.setSetupState);
   const setProviderSecretStatuses = useSettingsStore((state) => state.setProviderSecretStatuses);
   const { activeServers, servers } = useMcp();
   const pushRuntimeActivity = useRuntimeActivityStore((state) => state.push);
@@ -401,6 +404,13 @@ export default function RootPage(): JSX.Element {
     setIsSettingsModalOpen(true);
   }
 
+  function completeSetup(): void {
+    setSetupState({
+      completed: true,
+      version: 1,
+    });
+  }
+
   function renderActiveSection(): JSX.Element {
     switch (activeSection) {
       case "overview":
@@ -506,6 +516,10 @@ export default function RootPage(): JSX.Element {
       default:
         return <Overview connectedServerCount={connectedServerCount} availableToolCount={availableToolCount} onOpenChatPage={() => setActiveSection("chat")} onOpenSettings={() => openSettings("ai")} operatorName={userName} />;
     }
+  }
+
+  if (hydrated && !setup.completed) {
+    return <SetupWizard onComplete={completeSetup} />;
   }
 
   return (

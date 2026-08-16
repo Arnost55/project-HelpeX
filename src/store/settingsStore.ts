@@ -59,6 +59,7 @@ interface SettingsState {
   markProviderFailure: (provider: ProviderId) => void;
   setProviderHealth: (provider: ProviderId, health: ProviderHealthState) => void;
   setProviderSecretStatuses: (statuses: Partial<Record<ProviderId, boolean>>) => void;
+  setSetupState: (setup: SetupState) => void;
   resetProviderStats: () => void;
   hydrateFromConfig: (config: AppConfigView) => void;
   snapshotConfig: () => AppConfigView;
@@ -179,6 +180,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
             ...statuses,
           }
         })),
+      setSetupState: (setup) => set({ setup }),
       resetProviderStats: () =>
         set({
           providerStats: defaultProviderStats(),

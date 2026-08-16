@@ -4,14 +4,12 @@ use jarvis_core::error::AppError;
 use jarvis_core::models::ChatStreamRequest;
 
 use crate::agent::cancellation::StreamCancellationToken;
+use crate::provider_registry;
 
 use super::{AgentMessage, AssistantTurn, ProviderConfig, ToolCall, ToolDefinition};
 
 pub fn supports_tools(provider: &str) -> bool {
-    matches!(
-        provider,
-        "openai" | "claude" | "ollama" | "groq" | "together"
-    )
+    provider_registry::supports_tool_calling(provider)
 }
 
 pub async fn complete(

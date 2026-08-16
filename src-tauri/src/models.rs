@@ -85,6 +85,7 @@ pub struct ProviderHealthResponse {
     pub healthy: bool,
     pub message: String,
     pub latency_ms: u128,
+    pub status: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

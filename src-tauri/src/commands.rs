@@ -16,6 +16,7 @@ use jarvis_core::models::{
 
 use crate::agent;
 use crate::agent::cancellation::{StreamCancellationRegistry, StreamCancellationToken};
+use crate::provider_registry::{self, ProviderDefinition};
 
 #[derive(Clone)]
 struct ProviderConfig {
@@ -462,13 +463,47 @@ fn build_health_response(
             healthy: true,
             message: "Connection OK".to_string(),
             latency_ms,
+            status: "healthy".to_string(),
         },
-        Err(message) => ProviderHealthResponse {
-            provider: provider.to_string(),
-            healthy: false,
-            message,
-            latency_ms,
-        },
+        Err(message) => {
+            let normalized = message.to_ascii_lowercase();
+            let status = if normalized.contains("missing") || normalized.contains("not configured")
+            {
+                "unconfigured"
+            } else if normalized.contains("401")
+                || normalized.contains("403")
+                || normalized.contains("unauthorized")
+                || normalized.contains("forbidden")
+            {
+                "authentication_error"
+            } else if normalized.contains("429") || normalized.contains("rate limit") {
+                "rate_limited"
+            } else if normalized.contains("unsupported") {
+                "unsupported"
+            } else if normalized.contains("invalid")
+                || normalized.contains("parse")
+                || normalized.contains("misconfigured")
+            {
+                "misconfigured"
+            } else if normalized.contains("connect")
+                || normalized.contains("dns")
+                || normalized.contains("refused")
+                || normalized.contains("timed out")
+                || normalized.contains("network")
+            {
+                "unreachable"
+            } else {
+                "unknown"
+            };
+
+            ProviderHealthResponse {
+                provider: provider.to_string(),
+                healthy: false,
+                message,
+                latency_ms,
+                status: status.to_string(),
+            }
+        }
     }
 }
 
@@ -1076,6 +1111,11 @@ pub async fn cancel_chat_stream(
 ) -> Result<(), String> {
     registry.cancel(&stream_id).await;
     Ok(())
+}
+
+#[tauri::command]
+pub fn list_supported_providers() -> Vec<ProviderDefinition> {
+    provider_registry::supported_providers()
 }
 
 #[tauri::command]

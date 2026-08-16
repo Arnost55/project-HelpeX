@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import type { ProviderHealthStatus, ProviderId } from "../types/provider";
 
-type Provider = "openai" | "claude" | "ollama" | "groq" | "together";
 type ThemeMode = string;
 
 interface ProviderStats {
@@ -16,13 +16,14 @@ interface ProviderHealthState {
   message: string;
   latencyMs: number;
   checkedAt: string;
+  status: ProviderHealthStatus;
 }
 
 
 
 interface SettingsState {
   theme: ThemeMode;
-  provider: Provider;
+  provider: ProviderId;
   openAiApiKey: string;
   claudeApiKey: string;
   groqApiKey: string;
@@ -31,13 +32,13 @@ interface SettingsState {
   groqBaseUrl: string;
   togetherBaseUrl: string;
   model: string;
-  fallbackProvider: "none" | Provider;
+  fallbackProvider: "none" | ProviderId;
   fallbackModel: string;
   temperature: number;
   maxTokens: number;
-  providerStats: Record<Provider, ProviderStats>;
-  providerHealth: Partial<Record<Provider, ProviderHealthState>>;
-  setProvider: (value: Provider) => void;
+  providerStats: Record<ProviderId, ProviderStats>;
+  providerHealth: Partial<Record<ProviderId, ProviderHealthState>>;
+  setProvider: (value: ProviderId) => void;
   setTheme: (value: ThemeMode) => void;
   setOpenAiApiKey: (value: string) => void;
   setClaudeApiKey: (value: string) => void;
@@ -47,17 +48,17 @@ interface SettingsState {
   setGroqBaseUrl: (value: string) => void;
   setTogetherBaseUrl: (value: string) => void;
   setModel: (value: string) => void;
-  setFallbackProvider: (value: "none" | Provider) => void;
+  setFallbackProvider: (value: "none" | ProviderId) => void;
   setFallbackModel: (value: string) => void;
   setTemperature: (value: number) => void;
   setMaxTokens: (value: number) => void;
-  markProviderSuccess: (provider: Provider, fallbackUsed: boolean) => void;
-  markProviderFailure: (provider: Provider) => void;
-  setProviderHealth: (provider: Provider, health: ProviderHealthState) => void;
+  markProviderSuccess: (provider: ProviderId, fallbackUsed: boolean) => void;
+  markProviderFailure: (provider: ProviderId) => void;
+  setProviderHealth: (provider: ProviderId, health: ProviderHealthState) => void;
   resetProviderStats: () => void;
 }
 
-const defaultProviderStats = (): Record<Provider, ProviderStats> => ({
+const defaultProviderStats = (): Record<ProviderId, ProviderStats> => ({
   openai: {
     successCount: 0,
     failureCount: 0,
@@ -168,7 +169,21 @@ export const useSettingsStore = create<SettingsState>()(
         })
     }),
     {
-      name: "jarvis-settings-v1"
+      name: "jarvis-settings-v2",
+      partialize: (state) => ({
+        theme: state.theme,
+        provider: state.provider,
+        ollamaBaseUrl: state.ollamaBaseUrl,
+        groqBaseUrl: state.groqBaseUrl,
+        togetherBaseUrl: state.togetherBaseUrl,
+        model: state.model,
+        fallbackProvider: state.fallbackProvider,
+        fallbackModel: state.fallbackModel,
+        temperature: state.temperature,
+        maxTokens: state.maxTokens,
+        providerStats: state.providerStats,
+        providerHealth: state.providerHealth,
+      })
     }
   )
 );

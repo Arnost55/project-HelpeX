@@ -3,6 +3,7 @@ mod commands;
 mod hotkeys;
 mod mcp;
 mod notifications;
+mod provider_registry;
 mod tray;
 
 use crate::agent::cancellation::StreamCancellationRegistry;
@@ -84,6 +85,7 @@ pub fn run() {
             commands::load_user_profile,
             commands::stream_chat,
             commands::cancel_chat_stream,
+            commands::list_supported_providers,
             commands::list_provider_models,
             commands::check_provider_health,
             commands::save_app_settings,
@@ -96,7 +98,13 @@ pub fn run() {
             mcp::mcp_spawn_and_initialize,
             mcp::mcp_get_active_tools,
             mcp::mcp_execute_tool,
+            mcp::mcp_list_servers,
+            mcp::mcp_upsert_server,
             mcp::mcp_disconnect_server,
+            mcp::mcp_delete_server,
+            mcp::mcp_restart_server,
+            mcp::mcp_set_server_enabled,
+            mcp::mcp_set_tool_enabled,
             mcp::mcp_hydrate_saved_servers,
             mcp::mcp_respond_to_permission_request,
         ])

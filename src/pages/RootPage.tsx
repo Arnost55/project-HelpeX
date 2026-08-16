@@ -2,20 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import CommandPalette from "../components/CommandPalette";
 import AppShell from "../components/layout/AppShell";
-import ActivityFeed from "../components/dashboard/ActivityFeed";
-import AutomationList from "../components/dashboard/AutomationList";
-import CameraGrid from "../components/dashboard/CameraGrid";
 import Panel from "../components/dashboard/Panel";
-import SecurityOverview from "../components/dashboard/SecurityOverview";
-import SystemStatus from "../components/dashboard/SystemStatus";
 import { McpControlCenter } from "../components/McpControlCenter";
-import {
-  placeholderActivityEvents,
-  placeholderAutomations,
-  placeholderCameras,
-  placeholderSecurity,
-  placeholderServices,
-} from "../data/opsConsole";
 import { loadUserProfile } from "../api/userProfile";
 import { listConversations, listMessages, mapConversationFromDb, mapMessageFromDb } from "../api/tauriDb";
 import Overview from "./Overview";
@@ -75,7 +63,7 @@ export default function RootPage(): JSX.Element {
   const createConversation = useChatStore((state) => state.createConversation);
   const theme = useSettingsStore((state) => state.theme);
   const setTheme = useSettingsStore((state) => state.setTheme);
-  const { activeServers } = useMcp();
+  const { activeServers, servers } = useMcp();
   const upsertPendingApproval = useToolApprovalStore((state) => state.upsertPending);
   const clearApprovalForTool = useToolApprovalStore((state) => state.clearForTool);
   const pendingApprovals = useToolApprovalStore((state) => state.pending);
@@ -259,6 +247,7 @@ export default function RootPage(): JSX.Element {
   );
 
   const connectedServerCount = Object.keys(activeServers).length;
+  const availableToolCount = servers.reduce((sum, server) => sum + server.toolCount, 0);
   const systemStatusLabel = connectedServerCount > 0 || isOnline ? "System Online" : "Attention Required";
 
   function openSettings(tab: SettingsTab = "ai"): void {
@@ -271,8 +260,8 @@ export default function RootPage(): JSX.Element {
       case "overview":
         return (
           <Overview
-            activeServerCount={connectedServerCount}
-            cameraCount={placeholderCameras.length}
+            connectedServerCount={connectedServerCount}
+            availableToolCount={availableToolCount}
             onOpenChatPage={() => setActiveSection("chat")}
             onOpenSettings={() => openSettings("ai")}
             operatorName={userName}
@@ -284,10 +273,12 @@ export default function RootPage(): JSX.Element {
         return (
           <ConsoleSectionPage
             title="Automations"
-            description="Automation state remains placeholder-backed until backend automation bindings are connected."
+            description="Automation runtime is out of scope for this sprint, so HelpeX shows an honest empty state instead of fake automation data."
           >
-            <Panel title="Active Automations">
-              <AutomationList automations={placeholderAutomations} />
+            <Panel title="Automations">
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+                No live automation engine is connected yet.
+              </p>
             </Panel>
           </ConsoleSectionPage>
         );
@@ -306,26 +297,25 @@ export default function RootPage(): JSX.Element {
         return (
           <ConsoleSectionPage
             title="Security"
-            description="Security posture is UI-only here; sensitive enforcement continues in the Rust backend."
+            description="Approval and authorization are enforced in the backend. Security telemetry and posture dashboards are not implemented yet."
           >
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-              <Panel title="Security Overview">
-                <SecurityOverview security={placeholderSecurity} />
-              </Panel>
-              <Panel title="Recent Security Events">
-                <ActivityFeed events={placeholderActivityEvents.filter((event) => event.category === "security")} />
-              </Panel>
-            </div>
+            <Panel title="Security State">
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+                No live security telemetry source is connected. Tool authorization, approvals, and audit logging still remain active in the Rust backend.
+              </p>
+            </Panel>
           </ConsoleSectionPage>
         );
       case "cameras":
         return (
           <ConsoleSectionPage
             title="Cameras"
-            description="Camera cards are architected for future Frigate preview and detection event bindings."
+            description="Camera integrations are intentionally out of scope for this sprint."
           >
-            <Panel title="Camera Grid">
-              <CameraGrid cameras={placeholderCameras} />
+            <Panel title="Cameras">
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+                No camera providers are configured. Frigate and camera event pipelines are planned for a later sprint.
+              </p>
             </Panel>
           </ConsoleSectionPage>
         );
@@ -334,10 +324,12 @@ export default function RootPage(): JSX.Element {
         return (
           <ConsoleSectionPage
             title={activeSection === "servers" ? "Servers" : "Systems"}
-            description="Service rows are placeholder data until live backend service health endpoints are exposed."
+            description="Host and service telemetry are not wired yet, so HelpeX shows real runtime state only where data exists."
           >
-            <Panel title="System Status">
-              <SystemStatus services={placeholderServices} />
+            <Panel title="Systems">
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+                System health telemetry has not been implemented yet.
+              </p>
             </Panel>
           </ConsoleSectionPage>
         );
@@ -345,10 +337,12 @@ export default function RootPage(): JSX.Element {
         return (
           <ConsoleSectionPage
             title="Network"
-            description="Network status will move to live backend telemetry once host and edge metrics are exposed."
+            description="The shell can tell whether the desktop is online, but detailed network telemetry is not implemented yet."
           >
             <Panel title="Connectivity">
-              <SystemStatus services={placeholderServices.filter((service) => ["Internet", "MQTT Broker", "Home Assistant"].includes(service.name))} />
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+                Network telemetry beyond basic online or offline status is not available yet.
+              </p>
             </Panel>
           </ConsoleSectionPage>
         );
@@ -356,15 +350,17 @@ export default function RootPage(): JSX.Element {
         return (
           <ConsoleSectionPage
             title="Logs"
-            description="The current log feed is a placeholder-ready event model designed for future integrations."
+            description="HelpeX currently exposes audit trails for tools and approvals in the backend, but a frontend log explorer is not implemented yet."
           >
             <Panel title="Recent Activity">
-              <ActivityFeed events={placeholderActivityEvents} />
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+                No frontend log viewer is available yet. Use the current MCP and tool activity surfaces for live runtime status.
+              </p>
             </Panel>
           </ConsoleSectionPage>
         );
       default:
-        return <Overview activeServerCount={connectedServerCount} cameraCount={placeholderCameras.length} onOpenChatPage={() => setActiveSection("chat")} onOpenSettings={() => openSettings("ai")} operatorName={userName} />;
+        return <Overview connectedServerCount={connectedServerCount} availableToolCount={availableToolCount} onOpenChatPage={() => setActiveSection("chat")} onOpenSettings={() => openSettings("ai")} operatorName={userName} />;
     }
   }
 

@@ -1,11 +1,12 @@
 mod audit;
 pub mod authorization;
 mod client;
+mod config;
 mod permissions;
 mod protocol;
 mod schema;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -15,6 +16,10 @@ use authorization::{
     authorize_request, ActionContext, AuthorizationDecision, RequestAuthority, RequestOrigin,
 };
 use client::{McpClient, McpClientError};
+use config::{
+    McpServerConfigInput, McpServerEnvironmentEntry, McpServerStatus, McpServerView, McpToolView,
+    PersistedServerConfig,
+};
 use permissions::{
     load_permission_policy, PermissionDecision, PermissionEvaluation, PermissionLevel,
 };
@@ -43,23 +48,32 @@ pub struct ActiveServer {
     pub process: Arc<Mutex<Child>>,
     pub client: Arc<McpClient>,
     pub tools: Arc<RwLock<HashMap<String, McpTool>>>,
+    pub disabled_tools: Arc<RwLock<HashSet<String>>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ServerRuntimeState {
+    pub status: McpServerStatus,
+    pub error: Option<String>,
 }
 
 pub struct McpSystemState {
     pub servers: Arc<RwLock<HashMap<String, Arc<ActiveServer>>>>,
+    pub runtime: Arc<RwLock<HashMap<String, ServerRuntimeState>>>,
     pub pending_approvals: Arc<Mutex<HashMap<String, PendingApproval>>>,
 }
 
 pub struct PendingApproval {
-    pub snapshot: PendingApprovalSnapshot,
-    pub frozen_request: ToolExecutionRequest,
-    pub response_tx: oneshot::Sender<ApprovalResolution>,
+    snapshot: PendingApprovalSnapshot,
+    frozen_request: ToolExecutionRequest,
+    response_tx: oneshot::Sender<ApprovalResolution>,
 }
 
 impl Default for McpSystemState {
     fn default() -> Self {
         Self {
             servers: Arc::new(RwLock::new(HashMap::new())),
+            runtime: Arc::new(RwLock::new(HashMap::new())),
             pending_approvals: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -327,6 +341,7 @@ async fn spawn_server_process(
     name: &str,
     cmd: &str,
     args: &[String],
+    env: &[McpServerEnvironmentEntry],
 ) -> Result<(Child, Arc<McpClient>), String> {
     let resolved_cmd = resolve_executable_path(cmd);
     println!(
@@ -336,6 +351,11 @@ async fn spawn_server_process(
 
     let mut command_builder = Command::new(&resolved_cmd);
     command_builder.args(args);
+    for entry in env {
+        if let Some(value) = entry.value.as_ref() {
+            command_builder.env(&entry.name, value);
+        }
+    }
     command_builder.stdin(Stdio::piped());
     command_builder.stdout(Stdio::piped());
     command_builder.stderr(Stdio::piped());
@@ -434,17 +454,100 @@ async fn get_active_server(state: &McpSystemState, name: &str) -> Option<Arc<Act
     active_map.get(name).cloned()
 }
 
+async fn set_runtime_state(
+    state: &McpSystemState,
+    server_name: &str,
+    status: McpServerStatus,
+    error: Option<String>,
+) {
+    let mut runtime = state.runtime.write().await;
+    runtime.insert(
+        server_name.to_string(),
+        ServerRuntimeState { status, error },
+    );
+}
+
+fn normalize_server_config(input: McpServerConfigInput) -> PersistedServerConfig {
+    PersistedServerConfig {
+        name: input.name,
+        transport: input.transport,
+        cmd: input.cmd,
+        args: input.args,
+        env: input.env,
+        enabled: input.enabled,
+        disabled_tools: Vec::new(),
+    }
+}
+
+fn visible_env(entries: &[McpServerEnvironmentEntry]) -> Vec<McpServerEnvironmentEntry> {
+    entries
+        .iter()
+        .map(|entry| McpServerEnvironmentEntry {
+            name: entry.name.clone(),
+            value: if entry.secret {
+                None
+            } else {
+                entry.value.clone()
+            },
+            secret: entry.secret,
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    #[test]
+    fn visible_env_redacts_secret_values() {
+        let entries = vec![
+            McpServerEnvironmentEntry {
+                name: "TOKEN".to_string(),
+                value: Some("super-secret".to_string()),
+                secret: true,
+            },
+            McpServerEnvironmentEntry {
+                name: "URL".to_string(),
+                value: Some("http://localhost".to_string()),
+                secret: false,
+            },
+        ];
+
+        let visible = visible_env(&entries);
+        assert_eq!(visible[0].value, None);
+        assert_eq!(visible[1].value.as_deref(), Some("http://localhost"));
+    }
+
+    #[test]
+    fn normalize_server_config_initializes_disabled_tools() {
+        let config = normalize_server_config(McpServerConfigInput {
+            name: "filesystem".to_string(),
+            transport: "stdio".to_string(),
+            cmd: "npx".to_string(),
+            args: vec![
+                "-y".to_string(),
+                "@modelcontextprotocol/server-filesystem".to_string(),
+            ],
+            env: Vec::new(),
+            enabled: true,
+        });
+
+        assert_eq!(config.transport, "stdio");
+        assert!(config.disabled_tools.is_empty());
+        assert!(config.enabled);
+    }
+}
+
 async fn spawn_and_register_server(
     app_handle: &AppHandle,
-    name: String,
-    cmd: String,
-    args: Vec<String>,
+    config: PersistedServerConfig,
     persist_config: bool,
 ) -> Result<Vec<McpTool>, String> {
     let state = app_handle.state::<McpSystemState>();
+    set_runtime_state(&state, &config.name, McpServerStatus::Starting, None).await;
 
-    if let Some(existing) = get_active_server(&state, &name).await {
-        if existing.cmd == cmd && existing.args == args {
+    if let Some(existing) = get_active_server(&state, &config.name).await {
+        if existing.cmd == config.cmd && existing.args == config.args {
             let tools = existing
                 .tools
                 .read()
@@ -457,30 +560,42 @@ async fn spawn_and_register_server(
 
         return Err(format!(
             "An MCP server named '{}' is already active with a different command",
-            name
+            config.name
         ));
     }
 
-    let (child, client) = spawn_server_process(&name, &cmd, &args).await?;
-    let tools = initialize_server(&name, &client).await?;
+    let (child, client) =
+        spawn_server_process(&config.name, &config.cmd, &config.args, &config.env).await?;
+    let tools = initialize_server(&config.name, &client).await?;
 
     let server = Arc::new(ActiveServer {
-        name: name.clone(),
-        cmd: cmd.clone(),
-        args: args.clone(),
+        name: config.name.clone(),
+        cmd: config.cmd.clone(),
+        args: config.args.clone(),
         process: Arc::new(Mutex::new(child)),
         client,
         tools: Arc::new(RwLock::new(to_tool_map(tools.clone()))),
+        disabled_tools: Arc::new(RwLock::new(
+            config
+                .disabled_tools
+                .iter()
+                .cloned()
+                .collect::<HashSet<_>>(),
+        )),
     });
 
     upsert_active_server(&state, server).await?;
+    set_runtime_state(&state, &config.name, McpServerStatus::Connected, None).await;
 
     if persist_config {
         let mut persisted = load_persisted_servers(app_handle).unwrap_or_default();
-        if let Some(position) = persisted.iter().position(|server| server.name == name) {
-            persisted[position] = PersistedServer { name, cmd, args };
+        if let Some(position) = persisted
+            .iter()
+            .position(|server| server.name == config.name)
+        {
+            persisted[position] = config.clone();
         } else {
-            persisted.push(PersistedServer { name, cmd, args });
+            persisted.push(config);
         }
         save_persisted_servers(app_handle, &persisted)?;
     }
@@ -543,6 +658,21 @@ pub async fn execute_tool(
             )
         })?
     };
+
+    if server
+        .disabled_tools
+        .read()
+        .await
+        .contains(&request.tool_name)
+    {
+        return Err(ToolExecutionError::new(
+            ToolExecutionErrorKind::PermissionDenied,
+            format!(
+                "Tool '{}.{}' is disabled by server policy",
+                request.server_name, request.tool_name
+            ),
+        ));
+    }
 
     validate_tool_arguments(&tool.input_schema, &request.arguments).map_err(|issues| {
         ToolExecutionError::new(
@@ -654,7 +784,20 @@ pub async fn mcp_spawn_and_initialize(
     cmd: String,
     args: Vec<String>,
 ) -> Result<Vec<McpTool>, String> {
-    spawn_and_register_server(&app_handle, name, cmd, args, true).await
+    spawn_and_register_server(
+        &app_handle,
+        PersistedServerConfig {
+            name,
+            transport: "stdio".to_string(),
+            cmd,
+            args,
+            env: Vec::new(),
+            enabled: true,
+            disabled_tools: Vec::new(),
+        },
+        true,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -664,11 +807,13 @@ pub async fn mcp_get_active_tools(
     let active_map = state.servers.read().await;
     let mut summary = HashMap::new();
     for (server_name, server) in active_map.iter() {
+        let disabled = server.disabled_tools.read().await.clone();
         let tools = server
             .tools
             .read()
             .await
             .values()
+            .filter(|tool| !disabled.contains(&tool.name))
             .cloned()
             .collect::<Vec<_>>();
         summary.insert(server_name.clone(), tools);
@@ -737,10 +882,7 @@ pub async fn mcp_disconnect_server(app_handle: AppHandle, name: String) -> Resul
         .kill()
         .await
         .map_err(|error| format!("Failed to terminate '{}': {}", name, error))?;
-
-    let mut persisted = load_persisted_servers(&app_handle).unwrap_or_default();
-    persisted.retain(|server| server.name != name);
-    save_persisted_servers(&app_handle, &persisted)?;
+    set_runtime_state(&state, &name, McpServerStatus::Disconnected, None).await;
 
     Ok(())
 }
@@ -749,12 +891,21 @@ pub async fn mcp_disconnect_server(app_handle: AppHandle, name: String) -> Resul
 pub async fn mcp_hydrate_saved_servers(app_handle: AppHandle) -> Result<(), String> {
     let persisted = load_persisted_servers(&app_handle)?;
     for server in persisted {
+        if !server.enabled {
+            continue;
+        }
         let handle = app_handle.clone();
         tauri::async_runtime::spawn(async move {
-            if let Err(error) =
-                spawn_and_register_server(&handle, server.name, server.cmd, server.args, false)
-                    .await
-            {
+            let server_name = server.name.clone();
+            if let Err(error) = spawn_and_register_server(&handle, server, false).await {
+                let state = handle.state::<McpSystemState>();
+                set_runtime_state(
+                    &state,
+                    &server_name,
+                    McpServerStatus::Failed,
+                    Some(error.clone()),
+                )
+                .await;
                 eprintln!("[MCP] Failed to hydrate server: {}", error);
             }
         });
@@ -771,9 +922,15 @@ pub async fn auto_spawn_and_register(
 ) -> Result<(), String> {
     spawn_and_register_server(
         app_handle,
-        name.to_string(),
-        cmd.to_string(),
-        args.to_vec(),
+        PersistedServerConfig {
+            name: name.to_string(),
+            transport: "stdio".to_string(),
+            cmd: cmd.to_string(),
+            args: args.to_vec(),
+            env: Vec::new(),
+            enabled: true,
+            disabled_tools: Vec::new(),
+        },
         false,
     )
     .await
@@ -784,7 +941,14 @@ pub async fn active_tool_count(state: &McpSystemState) -> usize {
     let active_map = state.servers.read().await;
     let mut total = 0usize;
     for server in active_map.values() {
-        total += server.tools.read().await.len();
+        let disabled = server.disabled_tools.read().await.clone();
+        total += server
+            .tools
+            .read()
+            .await
+            .values()
+            .filter(|tool| !disabled.contains(&tool.name))
+            .count();
     }
     total
 }
@@ -793,19 +957,16 @@ pub async fn collect_active_tools(state: &McpSystemState) -> Vec<(String, McpToo
     let active_map = state.servers.read().await;
     let mut tools = Vec::new();
     for (server_name, server) in active_map.iter() {
+        let disabled = server.disabled_tools.read().await.clone();
         let server_tools = server.tools.read().await;
         for tool in server_tools.values() {
+            if disabled.contains(&tool.name) {
+                continue;
+            }
             tools.push((server_name.clone(), tool.clone()));
         }
     }
     tools
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PersistedServer {
-    pub name: String,
-    pub cmd: String,
-    pub args: Vec<String>,
 }
 
 pub fn get_mcp_config_path(app_handle: &AppHandle) -> std::path::PathBuf {
@@ -818,7 +979,7 @@ pub fn get_mcp_config_path(app_handle: &AppHandle) -> std::path::PathBuf {
 
 fn save_persisted_servers(
     app_handle: &AppHandle,
-    configs: &[PersistedServer],
+    configs: &[PersistedServerConfig],
 ) -> Result<(), String> {
     let path = get_mcp_config_path(app_handle);
     if let Some(parent) = path.parent() {
@@ -829,7 +990,9 @@ fn save_persisted_servers(
     std::fs::write(&path, json).map_err(|error| error.to_string())
 }
 
-pub fn load_persisted_servers(app_handle: &AppHandle) -> Result<Vec<PersistedServer>, String> {
+pub fn load_persisted_servers(
+    app_handle: &AppHandle,
+) -> Result<Vec<PersistedServerConfig>, String> {
     let path = get_mcp_config_path(app_handle);
     if !path.exists() {
         return Ok(Vec::new());
@@ -837,6 +1000,315 @@ pub fn load_persisted_servers(app_handle: &AppHandle) -> Result<Vec<PersistedSer
 
     let json = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
     serde_json::from_str(&json).map_err(|error| error.to_string())
+}
+
+async fn build_server_view(
+    app_handle: &AppHandle,
+    config: &PersistedServerConfig,
+    active: Option<Arc<ActiveServer>>,
+    runtime: Option<ServerRuntimeState>,
+) -> McpServerView {
+    let policy = load_permission_policy(app_handle).await.unwrap_or_default();
+    let disabled_tools = config
+        .disabled_tools
+        .iter()
+        .cloned()
+        .collect::<HashSet<_>>();
+    let status = if !config.enabled {
+        McpServerStatus::Disabled
+    } else if active.is_some() {
+        McpServerStatus::Connected
+    } else {
+        runtime
+            .as_ref()
+            .map(|item| item.status.clone())
+            .unwrap_or(McpServerStatus::Disconnected)
+    };
+    let error = runtime.and_then(|item| item.error);
+
+    let tools = if let Some(server) = active {
+        let server_tools = server.tools.read().await;
+        let mut items = server_tools
+            .values()
+            .map(|tool| {
+                let permission = permissions::evaluate_permission(&policy, &config.name, tool);
+                McpToolView {
+                    name: tool.name.clone(),
+                    description: tool.description.clone(),
+                    provider_safe_alias: format!("{}_{}", config.name, tool.name),
+                    enabled: !disabled_tools.contains(&tool.name),
+                    permission,
+                    input_schema: tool.input_schema.clone(),
+                }
+            })
+            .collect::<Vec<_>>();
+        items.sort_by(|left, right| left.name.cmp(&right.name));
+        items
+    } else {
+        Vec::new()
+    };
+
+    let tool_count = tools.iter().filter(|tool| tool.enabled).count();
+    let disabled_tool_count = tools.iter().filter(|tool| !tool.enabled).count();
+
+    McpServerView {
+        name: config.name.clone(),
+        transport: config.transport.clone(),
+        cmd: config.cmd.clone(),
+        args: config.args.clone(),
+        env: visible_env(&config.env),
+        enabled: config.enabled,
+        status,
+        error,
+        tool_count,
+        disabled_tool_count,
+        tools,
+    }
+}
+
+#[tauri::command]
+pub async fn mcp_list_servers(app_handle: AppHandle) -> Result<Vec<McpServerView>, String> {
+    let configs = load_persisted_servers(&app_handle)?;
+    let state = app_handle.state::<McpSystemState>();
+    let active = state.servers.read().await.clone();
+    let runtime = state.runtime.read().await.clone();
+    let mut views = Vec::new();
+
+    for config in configs {
+        views.push(
+            build_server_view(
+                &app_handle,
+                &config,
+                active.get(&config.name).cloned(),
+                runtime.get(&config.name).cloned(),
+            )
+            .await,
+        );
+    }
+
+    views.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(views)
+}
+
+#[tauri::command]
+pub async fn mcp_upsert_server(
+    app_handle: AppHandle,
+    config: McpServerConfigInput,
+) -> Result<McpServerView, String> {
+    let config = normalize_server_config(config);
+    let mut configs = load_persisted_servers(&app_handle)?;
+    let existing_disabled_tools = configs
+        .iter()
+        .find(|item| item.name == config.name)
+        .map(|item| item.disabled_tools.clone())
+        .unwrap_or_default();
+
+    let persisted_config = PersistedServerConfig {
+        disabled_tools: existing_disabled_tools,
+        ..config
+    };
+
+    if let Some(position) = configs
+        .iter()
+        .position(|item| item.name == persisted_config.name)
+    {
+        configs[position] = persisted_config.clone();
+    } else {
+        configs.push(persisted_config.clone());
+    }
+    save_persisted_servers(&app_handle, &configs)?;
+
+    let state = app_handle.state::<McpSystemState>();
+    if persisted_config.enabled {
+        if let Some(active) = get_active_server(&state, &persisted_config.name).await {
+            active.client.close().await;
+            let mut child = active.process.lock().await;
+            let _ = child.kill().await;
+            state.servers.write().await.remove(&persisted_config.name);
+        }
+
+        if let Err(error) =
+            spawn_and_register_server(&app_handle, persisted_config.clone(), false).await
+        {
+            set_runtime_state(
+                &state,
+                &persisted_config.name,
+                McpServerStatus::Failed,
+                Some(error.clone()),
+            )
+            .await;
+            return Err(error);
+        }
+    } else if get_active_server(&state, &persisted_config.name)
+        .await
+        .is_some()
+    {
+        mcp_disconnect_server(app_handle.clone(), persisted_config.name.clone()).await?;
+    }
+
+    let view = build_server_view(
+        &app_handle,
+        &persisted_config,
+        get_active_server(&state, &persisted_config.name).await,
+        state
+            .runtime
+            .read()
+            .await
+            .get(&persisted_config.name)
+            .cloned(),
+    )
+    .await;
+    Ok(view)
+}
+
+#[tauri::command]
+pub async fn mcp_delete_server(app_handle: AppHandle, name: String) -> Result<(), String> {
+    if get_active_server(&app_handle.state::<McpSystemState>(), &name)
+        .await
+        .is_some()
+    {
+        mcp_disconnect_server(app_handle.clone(), name.clone()).await?;
+    }
+
+    let mut configs = load_persisted_servers(&app_handle)?;
+    configs.retain(|config| config.name != name);
+    save_persisted_servers(&app_handle, &configs)?;
+    app_handle
+        .state::<McpSystemState>()
+        .runtime
+        .write()
+        .await
+        .remove(&name);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn mcp_restart_server(
+    app_handle: AppHandle,
+    name: String,
+) -> Result<McpServerView, String> {
+    let configs = load_persisted_servers(&app_handle)?;
+    let config = configs
+        .into_iter()
+        .find(|config| config.name == name)
+        .ok_or_else(|| format!("No configured MCP server named '{}'", name))?;
+
+    if get_active_server(&app_handle.state::<McpSystemState>(), &config.name)
+        .await
+        .is_some()
+    {
+        mcp_disconnect_server(app_handle.clone(), config.name.clone()).await?;
+    }
+
+    if config.enabled {
+        spawn_and_register_server(&app_handle, config.clone(), false).await?;
+    }
+
+    let view = build_server_view(
+        &app_handle,
+        &config,
+        get_active_server(&app_handle.state::<McpSystemState>(), &config.name).await,
+        app_handle
+            .state::<McpSystemState>()
+            .runtime
+            .read()
+            .await
+            .get(&config.name)
+            .cloned(),
+    )
+    .await;
+    Ok(view)
+}
+
+#[tauri::command]
+pub async fn mcp_set_server_enabled(
+    app_handle: AppHandle,
+    name: String,
+    enabled: bool,
+) -> Result<McpServerView, String> {
+    let mut configs = load_persisted_servers(&app_handle)?;
+    let position = configs
+        .iter()
+        .position(|config| config.name == name)
+        .ok_or_else(|| format!("No configured MCP server named '{}'", name))?;
+    configs[position].enabled = enabled;
+    let config = configs[position].clone();
+    save_persisted_servers(&app_handle, &configs)?;
+
+    if enabled {
+        spawn_and_register_server(&app_handle, config.clone(), false).await?;
+    } else if get_active_server(&app_handle.state::<McpSystemState>(), &name)
+        .await
+        .is_some()
+    {
+        mcp_disconnect_server(app_handle.clone(), name.clone()).await?;
+    }
+
+    let view = build_server_view(
+        &app_handle,
+        &config,
+        get_active_server(&app_handle.state::<McpSystemState>(), &name).await,
+        app_handle
+            .state::<McpSystemState>()
+            .runtime
+            .read()
+            .await
+            .get(&name)
+            .cloned(),
+    )
+    .await;
+    Ok(view)
+}
+
+#[tauri::command]
+pub async fn mcp_set_tool_enabled(
+    app_handle: AppHandle,
+    server_name: String,
+    tool_name: String,
+    enabled: bool,
+) -> Result<McpServerView, String> {
+    let mut configs = load_persisted_servers(&app_handle)?;
+    let position = configs
+        .iter()
+        .position(|config| config.name == server_name)
+        .ok_or_else(|| format!("No configured MCP server named '{}'", server_name))?;
+
+    if enabled {
+        configs[position]
+            .disabled_tools
+            .retain(|name| name != &tool_name);
+    } else if !configs[position].disabled_tools.contains(&tool_name) {
+        configs[position].disabled_tools.push(tool_name.clone());
+    }
+
+    let config = configs[position].clone();
+    save_persisted_servers(&app_handle, &configs)?;
+
+    if let Some(server) =
+        get_active_server(&app_handle.state::<McpSystemState>(), &server_name).await
+    {
+        let mut disabled = server.disabled_tools.write().await;
+        if enabled {
+            disabled.remove(&tool_name);
+        } else {
+            disabled.insert(tool_name.clone());
+        }
+    }
+
+    let view = build_server_view(
+        &app_handle,
+        &config,
+        get_active_server(&app_handle.state::<McpSystemState>(), &server_name).await,
+        app_handle
+            .state::<McpSystemState>()
+            .runtime
+            .read()
+            .await
+            .get(&server_name)
+            .cloned(),
+    )
+    .await;
+    Ok(view)
 }
 
 pub fn structured_tool_error(error: &ToolExecutionError) -> Value {

@@ -1,16 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
-
-export interface ProviderHealth {
-  provider: string;
-  healthy: boolean;
-  message: string;
-  latencyMs: number;
-}
+import type { ProviderDefinition, ProviderHealth, ProviderId } from "../types/provider";
 
 interface ProviderRequest {
-  provider: "openai" | "claude" | "ollama" | "groq" | "together";
+  provider: ProviderId;
   apiKey?: string;
   baseUrl?: string;
+}
+
+export async function listSupportedProviders(): Promise<ProviderDefinition[]> {
+  return invoke("list_supported_providers");
 }
 
 export async function listProviderModels(request: ProviderRequest): Promise<string[]> {

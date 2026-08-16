@@ -111,6 +111,7 @@ export default function Settings({
   const setTemperature = useSettingsStore((state) => state.setTemperature);
   const setMaxTokens = useSettingsStore((state) => state.setMaxTokens);
   const setProviderHealth = useSettingsStore((state) => state.setProviderHealth);
+  const syncProviderSecretStatuses = useSettingsStore((state) => state.setProviderSecretStatuses);
   const [supportedProviders, setSupportedProviders] = useState<ProviderDefinition[]>([]);
   const [availableThemes, setAvailableThemes] = useState<ThemeDefinition[]>([]);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -151,7 +152,12 @@ export default function Settings({
       return;
     }
     void listSupportedProviders().then(setSupportedProviders);
-    void listProviderSecretStatuses().then(setProviderSecretStatuses).catch(() => undefined);
+    void listProviderSecretStatuses()
+      .then((statuses) => {
+        setProviderSecretStatuses(statuses);
+        syncProviderSecretStatuses(statuses);
+      })
+      .catch(() => undefined);
     void getAvailableThemes().then(setAvailableThemes).catch(() => undefined);
   }, [isOpen]);
 
@@ -286,6 +292,7 @@ export default function Settings({
       setApiKey(provider, "");
       const statuses = await listProviderSecretStatuses();
       setProviderSecretStatuses(statuses);
+      syncProviderSecretStatuses(statuses);
       await runHealthCheck();
       await loadModels(true);
     } finally {
@@ -300,6 +307,7 @@ export default function Settings({
       setApiKey(provider, "");
       const statuses = await listProviderSecretStatuses();
       setProviderSecretStatuses(statuses);
+      syncProviderSecretStatuses(statuses);
     } finally {
       setSavingSecret(false);
     }

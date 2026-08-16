@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use base64::Engine;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -16,6 +15,7 @@ use jarvis_core::models::{
 
 use crate::agent;
 use crate::agent::cancellation::{StreamCancellationRegistry, StreamCancellationToken};
+use crate::app_config::{self, AppConfigInput, AppConfigView};
 use crate::provider_registry::{self, ProviderDefinition};
 use crate::secret_store::secret_store;
 
@@ -1177,6 +1177,18 @@ pub fn list_supported_providers() -> Vec<ProviderDefinition> {
 }
 
 #[tauri::command]
+pub fn load_app_config(app: AppHandle) -> Result<AppConfigView, String> {
+    app_config::load_app_config(&app).map(app_config::config_to_view)
+}
+
+#[tauri::command]
+pub fn save_app_config(app: AppHandle, config: AppConfigInput) -> Result<AppConfigView, String> {
+    let normalized = app_config::config_from_input(config);
+    app_config::save_app_config(&app, &normalized)?;
+    Ok(app_config::config_to_view(normalized))
+}
+
+#[tauri::command]
 pub fn list_provider_secret_statuses(app: AppHandle) -> Result<HashMap<String, bool>, String> {
     let store = secret_store(&app);
     let mut statuses = HashMap::new();
@@ -1325,104 +1337,6 @@ pub async fn check_provider_health(
     };
 
     Ok(response)
-}
-
-// ─── Config Encryption (XOR + Base64) ────────────────────────────────────
-
-const CONFIG_XOR_KEY: &[u8] = b"j4rv1s_c0nfig_s4lt_x0r_2024!";
-
-fn xor_transform(data: &[u8]) -> Vec<u8> {
-    data.iter()
-        .enumerate()
-        .map(|(i, &b)| b ^ CONFIG_XOR_KEY[i % CONFIG_XOR_KEY.len()])
-        .collect()
-}
-
-fn decode_hex(hex: &str) -> Result<Vec<u8>, String> {
-    let hex = hex.trim();
-    if hex.len() % 2 != 0 {
-        return Err("Config hex length mismatch".to_string());
-    }
-    (0..hex.len())
-        .step_by(2)
-        .map(|i| {
-            u8::from_str_radix(&hex[i..i + 2], 16)
-                .map_err(|e| format!("Config hex decode error: {e}"))
-        })
-        .collect()
-}
-
-/// V2 format: XOR → Base64 (more compact, not trivially plain text).
-fn encrypt_config_v2(plaintext: &str) -> Result<String, String> {
-    let xored = xor_transform(plaintext.as_bytes());
-    Ok(base64::engine::general_purpose::STANDARD.encode(&xored))
-}
-
-fn decrypt_config_v2(encoded: &str) -> Result<String, String> {
-    let data = base64::engine::general_purpose::STANDARD
-        .decode(encoded)
-        .map_err(|e| format!("Base64 decode error: {e}"))?;
-    let decoded = xor_transform(&data);
-    String::from_utf8(decoded).map_err(|e| format!("UTF-8 decode error: {e}"))
-}
-
-#[tauri::command]
-pub fn save_app_settings(app: AppHandle, data: String) -> Result<(), String> {
-    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&app_data_dir).map_err(|e| e.to_string())?;
-
-    let config_path = app_data_dir.join("jarvis-config.dat");
-    let encoded = encrypt_config_v2(&data)?;
-
-    std::fs::write(&config_path, &encoded).map_err(|e| e.to_string())?;
-    eprintln!(
-        "[CONFIG] Saved {} bytes to {:?}",
-        encoded.len(),
-        config_path
-    );
-    Ok(())
-}
-
-#[tauri::command]
-pub fn load_app_settings(app: AppHandle) -> Result<String, String> {
-    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let config_path = app_data_dir.join("jarvis-config.dat");
-
-    if !config_path.exists() {
-        eprintln!("[CONFIG] No config file at {:?}", config_path);
-        return Ok(String::new());
-    }
-
-    let encoded = std::fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-    let trimmed = encoded.trim();
-
-    // Try V2 (XOR + Base64) first, then legacy (XOR + hex)
-    match decrypt_config_v2(trimmed) {
-        Ok(json_str) => {
-            eprintln!(
-                "[CONFIG] Loaded {} bytes from {:?}",
-                json_str.len(),
-                config_path
-            );
-            return Ok(json_str);
-        }
-        Err(v2_err) => {
-            eprintln!("[CONFIG] V2 decode failed (trying legacy hex): {v2_err}");
-        }
-    }
-
-    // Legacy fallback: XOR + hex (from old saves)
-    let decoded_hex = decode_hex(trimmed)?;
-    let decoded = xor_transform(&decoded_hex);
-    let json_str = String::from_utf8(decoded).map_err(|e| e.to_string())?;
-    eprintln!(
-        "[CONFIG] Legacy-loaded {} bytes from {:?}",
-        json_str.len(),
-        config_path
-    );
-
-    // Will be upgraded to V2 format on next save
-    Ok(json_str)
 }
 
 // ─── Nuclear Wipe: Clear all data ────────────────────────────────────────

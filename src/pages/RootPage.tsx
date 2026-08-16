@@ -4,8 +4,10 @@ import CommandPalette from "../components/CommandPalette";
 import AppShell from "../components/layout/AppShell";
 import Panel from "../components/dashboard/Panel";
 import { McpControlCenter } from "../components/McpControlCenter";
+import { listProviderSecretStatuses } from "../api/providers";
 import { loadUserProfile } from "../api/userProfile";
 import { listConversations, listMessages, mapConversationFromDb, mapMessageFromDb } from "../api/tauriDb";
+import { loadAppConfig, saveAppConfig } from "../api/settingsApi";
 import Overview from "./Overview";
 import ChatPage from "./ChatPage";
 import ConsoleSectionPage from "./ConsoleSectionPage";
@@ -63,6 +65,9 @@ export default function RootPage(): JSX.Element {
   const createConversation = useChatStore((state) => state.createConversation);
   const theme = useSettingsStore((state) => state.theme);
   const setTheme = useSettingsStore((state) => state.setTheme);
+  const hydrateFromConfig = useSettingsStore((state) => state.hydrateFromConfig);
+  const hydrated = useSettingsStore((state) => state.hydrated);
+  const setProviderSecretStatuses = useSettingsStore((state) => state.setProviderSecretStatuses);
   const { activeServers, servers } = useMcp();
   const upsertPendingApproval = useToolApprovalStore((state) => state.upsertPending);
   const clearApprovalForTool = useToolApprovalStore((state) => state.clearForTool);
@@ -75,6 +80,53 @@ export default function RootPage(): JSX.Element {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   const [uptimeTick, setUptimeTick] = useState(Date.now());
   const sessionStartedAtRef = useRef(Date.now());
+  const saveTimerRef = useRef<number | null>(null);
+
+  const configSnapshot = useSettingsStore((state) => state.snapshotConfig());
+
+  useEffect(() => {
+    let cancelled = false;
+
+    loadAppConfig()
+      .then((config) => {
+        if (!cancelled) {
+          hydrateFromConfig(config);
+        }
+      })
+      .catch(() => undefined);
+
+    void listProviderSecretStatuses()
+      .then((statuses) => {
+        if (!cancelled) {
+          setProviderSecretStatuses(statuses);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrateFromConfig, setProviderSecretStatuses]);
+
+  useEffect(() => {
+    if (!hydrated) {
+      return;
+    }
+
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+    }
+
+    saveTimerRef.current = window.setTimeout(() => {
+      void saveAppConfig(configSnapshot).catch(() => undefined);
+    }, 350);
+
+    return () => {
+      if (saveTimerRef.current) {
+        window.clearTimeout(saveTimerRef.current);
+      }
+    };
+  }, [configSnapshot, hydrated]);
 
   useEffect(() => {
     let cancelled = false;

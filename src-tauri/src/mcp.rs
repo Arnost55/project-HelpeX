@@ -44,7 +44,6 @@ const MCP_LIST_TOOLS_TIMEOUT_MS: u64 = 15_000;
 const MCP_TOOL_CALL_TIMEOUT_MS: u64 = 30_000;
 
 pub struct ActiveServer {
-    pub id: String,
     pub name: String,
     pub cmd: String,
     pub args: Vec<String>,
@@ -744,7 +743,6 @@ async fn spawn_and_register_server(
     let stop_requested = Arc::new(AtomicBool::new(false));
 
     let server = Arc::new(ActiveServer {
-        id: config.id.clone(),
         name: config.name.clone(),
         cmd: config.cmd.clone(),
         args: config.args.clone(),
@@ -1748,7 +1746,7 @@ async fn request_tool_approval(
         .with_permission(authorization.permission.clone()));
     }
 
-    let mut approval_timeout = tokio::time::sleep(Duration::from_secs(300));
+    let approval_timeout = tokio::time::sleep(Duration::from_secs(300));
     tokio::pin!(approval_timeout);
 
     let resolution = if let Some(token) = cancellation {

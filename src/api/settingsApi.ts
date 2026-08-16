@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { AppConfigView } from "../types/appConfig";
 
 export interface ThemeDefinition {
   id: string;
@@ -24,4 +25,12 @@ export async function runJarvisTask(request: JarvisTaskRequest): Promise<string>
 
 export async function getAvailableThemes(): Promise<ThemeDefinition[]> {
   return invoke("list_available_themes");
+}
+
+export async function loadAppConfig(): Promise<AppConfigView> {
+  return invoke("load_app_config");
+}
+
+export async function saveAppConfig(config: AppConfigView): Promise<AppConfigView> {
+  return invoke("save_app_config", { config });
 }

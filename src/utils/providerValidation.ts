@@ -13,6 +13,15 @@ interface ProviderValidationInput {
   model: string;
   fallbackProvider: FallbackProvider;
   fallbackModel: string;
+  configuredProviders?: Partial<Record<Provider, boolean>>;
+}
+
+function hasCredential(
+  provider: Provider,
+  inlineValue: string,
+  configuredProviders?: Partial<Record<Provider, boolean>>,
+): boolean {
+  return Boolean(inlineValue.trim()) || configuredProviders?.[provider] === true;
 }
 
 function isValidHttpUrl(value: string): boolean {
@@ -33,19 +42,23 @@ function validatePrimaryProvider(input: ProviderValidationInput): string[] {
 
   if (input.provider === "openai") {
     const apiKey = input.openAiApiKey.trim();
-    if (!apiKey) {
+    if (!hasCredential("openai", apiKey, input.configuredProviders)) {
       issues.push("OpenAI API key is required.");
     } else if (!apiKey.startsWith("sk-")) {
-      issues.push("OpenAI API key should start with 'sk-'.");
+      if (apiKey) {
+        issues.push("OpenAI API key should start with 'sk-'.");
+      }
     }
   }
 
   if (input.provider === "claude") {
     const apiKey = input.claudeApiKey.trim();
-    if (!apiKey) {
+    if (!hasCredential("claude", apiKey, input.configuredProviders)) {
       issues.push("Claude API key is required.");
     } else if (!apiKey.startsWith("sk-ant-")) {
-      issues.push("Claude API key should start with 'sk-ant-'.");
+      if (apiKey) {
+        issues.push("Claude API key should start with 'sk-ant-'.");
+      }
     }
   }
 
@@ -60,7 +73,7 @@ function validatePrimaryProvider(input: ProviderValidationInput): string[] {
 
   if (input.provider === "groq") {
     const apiKey = input.groqApiKey.trim();
-    if (!apiKey) {
+    if (!hasCredential("groq", apiKey, input.configuredProviders)) {
       issues.push("Groq API key is required.");
     }
 
@@ -74,7 +87,7 @@ function validatePrimaryProvider(input: ProviderValidationInput): string[] {
 
   if (input.provider === "together") {
     const apiKey = input.togetherApiKey.trim();
-    if (!apiKey) {
+    if (!hasCredential("together", apiKey, input.configuredProviders)) {
       issues.push("Together API key is required.");
     }
 
@@ -106,14 +119,14 @@ function validateFallbackProvider(input: ProviderValidationInput): string[] {
 
   if (input.fallbackProvider === "openai") {
     const apiKey = input.openAiApiKey.trim();
-    if (!apiKey) {
+    if (!hasCredential("openai", apiKey, input.configuredProviders)) {
       issues.push("OpenAI API key is required for OpenAI fallback.");
     }
   }
 
   if (input.fallbackProvider === "claude") {
     const apiKey = input.claudeApiKey.trim();
-    if (!apiKey) {
+    if (!hasCredential("claude", apiKey, input.configuredProviders)) {
       issues.push("Claude API key is required for Claude fallback.");
     }
   }
@@ -129,7 +142,7 @@ function validateFallbackProvider(input: ProviderValidationInput): string[] {
 
   if (input.fallbackProvider === "groq") {
     const apiKey = input.groqApiKey.trim();
-    if (!apiKey) {
+    if (!hasCredential("groq", apiKey, input.configuredProviders)) {
       issues.push("Groq API key is required for Groq fallback.");
     }
 
@@ -143,7 +156,7 @@ function validateFallbackProvider(input: ProviderValidationInput): string[] {
 
   if (input.fallbackProvider === "together") {
     const apiKey = input.togetherApiKey.trim();
-    if (!apiKey) {
+    if (!hasCredential("together", apiKey, input.configuredProviders)) {
       issues.push("Together API key is required for Together fallback.");
     }
 

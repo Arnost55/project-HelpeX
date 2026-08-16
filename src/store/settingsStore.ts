@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 import type { ProviderHealthStatus, ProviderId } from "../types/provider";
+import type { AppConfigView, SetupState } from "../types/appConfig";
 
 type ThemeMode = string;
 
@@ -38,6 +38,9 @@ interface SettingsState {
   maxTokens: number;
   providerStats: Record<ProviderId, ProviderStats>;
   providerHealth: Partial<Record<ProviderId, ProviderHealthState>>;
+  providerSecretsConfigured: Partial<Record<ProviderId, boolean>>;
+  setup: SetupState;
+  hydrated: boolean;
   setProvider: (value: ProviderId) => void;
   setTheme: (value: ThemeMode) => void;
   setOpenAiApiKey: (value: string) => void;
@@ -55,7 +58,10 @@ interface SettingsState {
   markProviderSuccess: (provider: ProviderId, fallbackUsed: boolean) => void;
   markProviderFailure: (provider: ProviderId) => void;
   setProviderHealth: (provider: ProviderId, health: ProviderHealthState) => void;
+  setProviderSecretStatuses: (statuses: Partial<Record<ProviderId, boolean>>) => void;
   resetProviderStats: () => void;
+  hydrateFromConfig: (config: AppConfigView) => void;
+  snapshotConfig: () => AppConfigView;
 }
 
 const defaultProviderStats = (): Record<ProviderId, ProviderStats> => ({
@@ -91,9 +97,7 @@ const defaultProviderStats = (): Record<ProviderId, ProviderStats> => ({
   }
 });
 
-export const useSettingsStore = create<SettingsState>()(
-  persist(
-    (set) => ({
+export const useSettingsStore = create<SettingsState>()((set, get) => ({
       theme: "default-dark",
       provider: "openai",
       openAiApiKey: "",
@@ -110,6 +114,12 @@ export const useSettingsStore = create<SettingsState>()(
       maxTokens: 1024,
       providerStats: defaultProviderStats(),
       providerHealth: {},
+      providerSecretsConfigured: {},
+      setup: {
+        completed: false,
+        version: 0,
+      },
+      hydrated: false,
       setTheme: (value) => set({ theme: value }),
       setProvider: (value) => set({ provider: value }),
       setOpenAiApiKey: (value) => set({ openAiApiKey: value }),
@@ -162,28 +172,49 @@ export const useSettingsStore = create<SettingsState>()(
             [provider]: health
           }
         })),
+      setProviderSecretStatuses: (statuses) =>
+        set((state) => ({
+          providerSecretsConfigured: {
+            ...state.providerSecretsConfigured,
+            ...statuses,
+          }
+        })),
       resetProviderStats: () =>
         set({
           providerStats: defaultProviderStats(),
           providerHealth: {}
-        })
-    }),
-    {
-      name: "jarvis-settings-v2",
-      partialize: (state) => ({
-        theme: state.theme,
-        provider: state.provider,
-        ollamaBaseUrl: state.ollamaBaseUrl,
-        groqBaseUrl: state.groqBaseUrl,
-        togetherBaseUrl: state.togetherBaseUrl,
-        model: state.model,
-        fallbackProvider: state.fallbackProvider,
-        fallbackModel: state.fallbackModel,
-        temperature: state.temperature,
-        maxTokens: state.maxTokens,
-        providerStats: state.providerStats,
-        providerHealth: state.providerHealth,
-      })
-    }
-  )
-);
+        }),
+      hydrateFromConfig: (config) =>
+        set((state) => ({
+          theme: config.theme,
+          provider: config.provider,
+          model: config.model,
+          fallbackProvider: config.fallbackProvider,
+          fallbackModel: config.fallbackModel,
+          ollamaBaseUrl: config.ollamaBaseUrl,
+          groqBaseUrl: config.groqBaseUrl,
+          togetherBaseUrl: config.togetherBaseUrl,
+          temperature: config.temperature,
+          maxTokens: config.maxTokens,
+          setup: config.setup,
+          hydrated: true,
+          providerStats: state.providerStats,
+          providerHealth: state.providerHealth,
+        })),
+      snapshotConfig: () => {
+        const state = get();
+        return {
+          theme: state.theme,
+          provider: state.provider,
+          model: state.model,
+          fallbackProvider: state.fallbackProvider,
+          fallbackModel: state.fallbackModel,
+          ollamaBaseUrl: state.ollamaBaseUrl,
+          groqBaseUrl: state.groqBaseUrl,
+          togetherBaseUrl: state.togetherBaseUrl,
+          temperature: state.temperature,
+          maxTokens: state.maxTokens,
+          setup: state.setup,
+        };
+      },
+    }));

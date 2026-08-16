@@ -100,6 +100,7 @@ export default function ChatPanel({
   const markProviderFailure = useSettingsStore((state) => state.markProviderFailure);
   const markProviderSuccess = useSettingsStore((state) => state.markProviderSuccess);
   const providerHealth = useSettingsStore((state) => state.providerHealth);
+  const providerSecretsConfigured = useSettingsStore((state) => state.providerSecretsConfigured);
   const isIncognito = useIncognitoStore((state) => state.isIncognito);
   const setIncognito = useIncognitoStore((state) => state.setIncognito);
   const [error, setError] = useState<string | null>(null);
@@ -255,6 +256,7 @@ export default function ChatPanel({
       model,
       fallbackProvider,
       fallbackModel,
+      configuredProviders: providerSecretsConfigured,
     });
 
     if (validationIssues.length > 0) {

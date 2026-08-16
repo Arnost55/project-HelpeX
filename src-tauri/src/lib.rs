@@ -1,3 +1,4 @@
+mod app_config;
 mod agent;
 mod commands;
 mod hotkeys;
@@ -87,13 +88,13 @@ pub fn run() {
             commands::stream_chat,
             commands::cancel_chat_stream,
             commands::list_supported_providers,
+            commands::load_app_config,
+            commands::save_app_config,
             commands::list_provider_secret_statuses,
             commands::store_provider_secret,
             commands::remove_provider_secret,
             commands::list_provider_models,
             commands::check_provider_health,
-            commands::save_app_settings,
-            commands::load_app_settings,
             commands::run_jarvis_task,
             commands::wipe_all_data,
             commands::reset_database,

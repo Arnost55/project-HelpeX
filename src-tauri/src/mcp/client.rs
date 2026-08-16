@@ -123,7 +123,7 @@ impl McpClient {
             )));
         }
 
-        let mut timeout = tokio::time::sleep(std::time::Duration::from_millis(timeout_ms));
+        let timeout = tokio::time::sleep(std::time::Duration::from_millis(timeout_ms));
         tokio::pin!(timeout);
 
         if let Some(token) = cancellation {

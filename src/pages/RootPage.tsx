@@ -4,6 +4,7 @@ import CommandPalette from "../components/CommandPalette";
 import AppShell from "../components/layout/AppShell";
 import Panel from "../components/dashboard/Panel";
 import { McpControlCenter } from "../components/McpControlCenter";
+import ActivityExplorer from "../components/runtime/ActivityExplorer";
 import { listProviderSecretStatuses } from "../api/providers";
 import { loadUserProfile } from "../api/userProfile";
 import { listConversations, listMessages, mapConversationFromDb, mapMessageFromDb } from "../api/tauriDb";
@@ -16,6 +17,7 @@ import { useChatStore } from "../store/chatStore";
 import { useSettingsStore } from "../store/settingsStore";
 import { useToolApprovalStore } from "../store/toolApprovalStore";
 import { useMcp } from "../hooks/useMcp";
+import { useRuntimeActivityStore } from "../store/runtimeActivityStore";
 import type { AppSection } from "../types/shell";
 import type { CoreMetric } from "../types/ops";
 import { formatDurationFromMs } from "../utils/formatting";
@@ -58,6 +60,20 @@ interface AgentToolEvent {
   streamId: string;
   serverName: string;
   toolName: string;
+  summary?: string | null;
+  durationMs?: number | null;
+  permissionDecision?: string | null;
+  permissionLevel?: string | null;
+}
+
+interface McpServerStateChangedEvent {
+  serverName: string;
+  status: string;
+  error?: string | null;
+}
+
+interface McpToolsChangedEvent {
+  serverName: string;
 }
 
 export default function RootPage(): JSX.Element {
@@ -69,6 +85,7 @@ export default function RootPage(): JSX.Element {
   const hydrated = useSettingsStore((state) => state.hydrated);
   const setProviderSecretStatuses = useSettingsStore((state) => state.setProviderSecretStatuses);
   const { activeServers, servers } = useMcp();
+  const pushRuntimeActivity = useRuntimeActivityStore((state) => state.push);
   const upsertPendingApproval = useToolApprovalStore((state) => state.upsertPending);
   const clearApprovalForTool = useToolApprovalStore((state) => state.clearForTool);
   const pendingApprovals = useToolApprovalStore((state) => state.pending);
@@ -206,6 +223,9 @@ export default function RootPage(): JSX.Element {
     let unlistenApprovalResolved: (() => void) | undefined;
     let unlistenToolResult: (() => void) | undefined;
     let unlistenToolError: (() => void) | undefined;
+    let unlistenProvider: (() => void) | undefined;
+    let unlistenMcpState: (() => void) | undefined;
+    let unlistenMcpTools: (() => void) | undefined;
 
     async function bindEvents() {
       unlistenToggle = await listen("toggle-command-palette", () => {
@@ -230,10 +250,31 @@ export default function RootPage(): JSX.Element {
           requestedAtMs: event.payload.requestedAtMs,
           expiresAtMs: event.payload.expiresAtMs,
         });
+        pushRuntimeActivity({
+          category: "approval",
+          title: `${event.payload.toolName} requested approval`,
+          summary: `${event.payload.permission.level} on ${event.payload.serverName}`,
+          timestampMs: event.payload.requestedAtMs,
+          details: {
+            serverName: event.payload.serverName,
+            toolName: event.payload.toolName,
+            permission: event.payload.permission,
+            requestOrigin: event.payload.requestOrigin,
+            capability: event.payload.capability,
+            scope: event.payload.scope,
+          },
+        });
       });
 
       unlistenApprovalResolved = await listen<ApprovalResolvedEvent>("agent-tool-approval-resolved", (event) => {
         useToolApprovalStore.getState().removePending(event.payload.approvalId);
+        pushRuntimeActivity({
+          category: "approval",
+          title: "Approval resolved",
+          summary: `${event.payload.approvalId} resolved`,
+          timestampMs: Date.now(),
+          details: event.payload as unknown as Record<string, unknown>,
+        });
       });
 
       const clearFromEvent = (event: { payload: AgentToolEvent }) => {
@@ -244,8 +285,58 @@ export default function RootPage(): JSX.Element {
         );
       };
 
-      unlistenToolResult = await listen<AgentToolEvent>("agent-tool-result", clearFromEvent);
-      unlistenToolError = await listen<AgentToolEvent>("agent-tool-error", clearFromEvent);
+      unlistenProvider = await listen("chat-stream-provider", (event) => {
+        const payload = event.payload as { provider: string; model: string; fallbackUsed: boolean };
+        pushRuntimeActivity({
+          category: "provider",
+          title: `${payload.provider} selected`,
+          summary: `${payload.model}${payload.fallbackUsed ? " (fallback)" : ""}`,
+          timestampMs: Date.now(),
+          details: payload as unknown as Record<string, unknown>,
+        });
+      });
+
+      unlistenToolResult = await listen<AgentToolEvent>("agent-tool-result", (event) => {
+        clearFromEvent(event as { payload: AgentToolEvent });
+        pushRuntimeActivity({
+          category: "tool",
+          title: `${event.payload.toolName} completed`,
+          summary: event.payload.summary ?? `Completed on ${event.payload.serverName}`,
+          timestampMs: Date.now(),
+          details: event.payload as unknown as Record<string, unknown>,
+        });
+      });
+
+      unlistenToolError = await listen<AgentToolEvent>("agent-tool-error", (event) => {
+        clearFromEvent(event as { payload: AgentToolEvent });
+        pushRuntimeActivity({
+          category: "error",
+          title: `${event.payload.toolName} failed`,
+          summary: event.payload.summary ?? `Failed on ${event.payload.serverName}`,
+          timestampMs: Date.now(),
+          details: event.payload as unknown as Record<string, unknown>,
+        });
+      });
+
+      unlistenMcpState = await listen<McpServerStateChangedEvent>("mcp-server-state-changed", (event) => {
+        pushRuntimeActivity({
+          category: event.payload.error ? "error" : "mcp",
+          title: `${event.payload.serverName} ${event.payload.status.toLowerCase()}`,
+          summary: event.payload.error ?? `Runtime state changed to ${event.payload.status}`,
+          timestampMs: Date.now(),
+          details: event.payload as unknown as Record<string, unknown>,
+        });
+      });
+
+      unlistenMcpTools = await listen<McpToolsChangedEvent>("mcp-tools-changed", (event) => {
+        pushRuntimeActivity({
+          category: "mcp",
+          title: `${event.payload.serverName} tools updated`,
+          summary: "Active MCP tool registry changed",
+          timestampMs: Date.now(),
+          details: event.payload as unknown as Record<string, unknown>,
+        });
+      });
     }
 
     void bindEvents();
@@ -256,11 +347,14 @@ export default function RootPage(): JSX.Element {
         unlistenToggle?.();
         unlistenApproval?.();
         unlistenApprovalResolved?.();
+        unlistenProvider?.();
         unlistenToolResult?.();
         unlistenToolError?.();
+        unlistenMcpState?.();
+        unlistenMcpTools?.();
       }
     };
-  }, [clearApprovalForTool, upsertPendingApproval]);
+  }, [clearApprovalForTool, pushRuntimeActivity, upsertPendingApproval]);
 
   const handleThemeChange = useCallback(
     async (themeObject: { id: string; isCustom?: boolean; colors?: Record<string, string> }) => {
@@ -401,13 +495,11 @@ export default function RootPage(): JSX.Element {
       case "logs":
         return (
           <ConsoleSectionPage
-            title="Logs"
-            description="HelpeX currently exposes audit trails for tools and approvals in the backend, but a frontend log explorer is not implemented yet."
+            title="Runtime"
+            description="Review provider, MCP, tool, approval, and error activity emitted by the live backend runtime."
           >
-            <Panel title="Recent Activity">
-              <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-                No frontend log viewer is available yet. Use the current MCP and tool activity surfaces for live runtime status.
-              </p>
+            <Panel title="Activity Explorer" description="This surface reflects backend runtime events, approval flow, and MCP lifecycle changes.">
+              <ActivityExplorer />
             </Panel>
           </ConsoleSectionPage>
         );

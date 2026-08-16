@@ -12,8 +12,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use audit::{log_tool_audit, redact_json_value, summarize_json_value, ToolAuditEntry};
 use authorization::{
-    authorize_request, build_action_context, ActionContext, AuthorizationDecision,
-    RequestAuthority, RequestOrigin,
+    authorize_request, ActionContext, AuthorizationDecision, RequestAuthority, RequestOrigin,
 };
 use client::{McpClient, McpClientError};
 use permissions::{
@@ -24,7 +23,7 @@ use protocol::{extract_tools_from_list_result, parse_tool_call_is_error};
 use schema::validate_tool_arguments;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::AsyncBufReadExt;
 use tokio::process::{Child, ChildStderr, Command};
 use tokio::sync::{oneshot, Mutex, RwLock};
